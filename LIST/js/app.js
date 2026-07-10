@@ -10,13 +10,38 @@ import {
   formatArabicDate,
   showToast,
   debounce,
+  ARABIC_MONTHS,
+  getMonthGrid,
+  buildHeatmapWeeks,
 } from './utils.js';
-import { renderCompass, renderDayStones, renderTaskCard, renderGoalManagerRow } from './components.js';
-import { renderWeeklyPointsChart } from './charts.js';
+import {
+  renderCompass,
+  renderDayStones,
+  renderTaskCard,
+  renderGoalManagerRow,
+  renderLevelBar,
+  renderStreakAndCoins,
+  renderAchievementCard,
+  renderAchievementPopup,
+  renderCalendarGrid,
+  renderHeatmap,
+  renderSearchResult,
+  renderStatGrid,
+  renderReportCard,
+  renderGoalYearProgress,
+  renderTemplateCard,
+} from './components.js';
+// import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
+import { computeGlobalStats, closeFinishedWeeks, countFullWeeks, countFullMonths } from './gamification.js';
+import { ACHIEVEMENTS, checkNewlyUnlocked } from './achievements.js';
+import { buildWeekReport, buildMonthReport, buildQuarterReport, buildYearReport } from './reports.js';
+import { buildExportPayload, downloadJSON, readImportFile, saveAutoBackup, getAutoBackupInfo } from './backup.js';
+import { initNavigation, openTab, closeTab, openProfile, closeProfile } from './navigation.js';
 
 // ============================================================
 // حالة التطبيق (State)
 // ============================================================
+const today = new Date();
 const state = {
   user: null,
   goals: [],
@@ -25,6 +50,20 @@ const state = {
   weekDates: getWeekDates(),
   selectedDate: toISODate(new Date()),
   weekNotes: null,
+  allWeekNotes: [], // كل ملاحظات الأسابيع (مطلوبة للبحث)
+  userStats: { xp: 0, coins: 0, best_streak: 0, week_history: [] },
+  unlockedAchievementIds: new Set(),
+  computedStats: null, // آخر نتيجة من computeGlobalStats + مشتقات إضافية
+  calendarYear: today.getFullYear(),
+  calendarMonth: today.getMonth(), // 0-11
+  heatmapYear: today.getFullYear(),
+  modalDate: null, // التاريخ المفتوح حاليًا في نافذة تفاصيل اليوم
+  reportTab: 'week',
+  reportWeek: getWeekDates(today)[0],
+  reportMonth: { year: today.getFullYear(), month: today.getMonth() },
+  reportQuarter: { year: today.getFullYear(), quarter: Math.floor(today.getMonth() / 3) },
+  reportYear: today.getFullYear(),
+  templates: [],
 };
 
 const el = (id) => document.getElementById(id);
@@ -42,6 +81,7 @@ async function init() {
     if (user) {
       el('auth-screen').classList.add('hidden');
       el('app-shell').classList.remove('hidden');
+      initNavigation(user.id);
       await loadEverything();
     } else {
       el('app-shell').classList.add('hidden');
@@ -54,6 +94,7 @@ async function init() {
   if (existingUser) {
     el('auth-screen').classList.add('hidden');
     el('app-shell').classList.remove('hidden');
+    initNavigation(existingUser.id);
     await loadEverything();
   }
 }
@@ -144,6 +185,7 @@ function bindStaticEvents() {
     el('new-goal-points').value = '';
     renderAll();
     showToast('تمت إضافة الهدف 🎯', 'success');
+    await checkAndUnlockAchievements();
   });
 
   el('btn-toggle-rest').addEventListener('click', async () => {
@@ -157,6 +199,7 @@ function bindStaticEvents() {
       await DB.upsertRow('rest_days', { id: restDayId(date), user_id: state.user.id, rest_date: date, note: '' });
     }
     renderAll();
+    await checkAndUnlockAchievements();
   });
 
   // ملاحظات الأسبوع: حفظ تلقائي أثناء الكتابة
@@ -180,6 +223,109 @@ function bindStaticEvents() {
     'change',
     debounce(handleGoalManagerChange, 400)
   );
+
+  el('btn-cal-prev').addEventListener('click', () => changeCalendarMonth(-1));
+  el('btn-cal-next').addEventListener('click', () => changeCalendarMonth(1));
+  el('btn-heatmap-prev').addEventListener('click', () => changeHeatmapYear(-1));
+  el('btn-heatmap-next').addEventListener('click', () => changeHeatmapYear(1));
+
+  el('search-input').addEventListener('input', debounce(performSearch, 300));
+  el('search-goal-filter').addEventListener('change', performSearch);
+
+  document.querySelectorAll('.js-report-tab').forEach((btn) => {
+    btn.addEventListener('click', () => switchReportTab(btn.dataset.tab));
+  });
+  el('btn-report-prev').addEventListener('click', () => navigateReport(-1));
+  el('btn-report-next').addEventListener('click', () => navigateReport(1));
+
+  el('btn-share-template').addEventListener('click', shareCurrentGoalsAsTemplate);
+
+  el('btn-export').addEventListener('click', handleExport);
+  el('btn-restore-backup').addEventListener('click', handleRestoreAutoBackup);
+  el('import-file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleImportFile(file);
+    e.target.value = '';
+  });
+
+  // ============================================================
+  // نظام التنقل: القائمة الجانبية + شريط الـ Tabs + صفحة حسابي
+  // ============================================================
+  el('nav-list').addEventListener('click', (e) => {
+    const navItem = e.target.closest('.nav-item[data-page]');
+    if (navItem) openTab(navItem.dataset.page);
+  });
+
+  el('nav-profile').addEventListener('click', () => {
+    openProfile();
+    renderProfilePage();
+  });
+
+  el('btn-profile-back').addEventListener('click', () => closeProfile());
+
+  // تفويض أحداث شريط الـ Tabs (فتح/تبديل/إغلاق)
+  el('tab-bar').addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('[data-close]');
+    if (closeBtn) {
+      closeTab(closeBtn.dataset.close);
+      return;
+    }
+    const tabBtn = e.target.closest('[data-tab-open]');
+    if (tabBtn) openTab(tabBtn.dataset.tabOpen);
+  });
+
+  el('btn-profile-logout').addEventListener('click', async () => {
+    await Auth.signOut();
+  });
+
+  el('btn-switch-account').addEventListener('click', async () => {
+    await Auth.signOut();
+    showToast('سجّل دخول بحسابك التاني دلوقتي', 'success');
+  });
+
+  el('btn-new-account').addEventListener('click', async () => {
+    await Auth.signOut();
+    switchAuthTab('signup');
+  });
+
+  el('btn-change-name').addEventListener('click', async () => {
+    const newName = prompt('اكتب اسمك الجديد:', state.user.user_metadata?.full_name || '');
+    if (!newName || !newName.trim()) return;
+    try {
+      await Auth.updateName(newName.trim());
+      await DB.upsertRow('profiles', { id: state.user.id, full_name: newName.trim() });
+      state.user.user_metadata = { ...state.user.user_metadata, full_name: newName.trim() };
+      renderProfilePage();
+      showToast('تم تحديث الاسم', 'success');
+    } catch (err) {
+      showToast(err.message || 'تعذر تحديث الاسم', 'error');
+    }
+  });
+
+  el('btn-change-email').addEventListener('click', async () => {
+    const newEmail = prompt('اكتب بريدك الإلكتروني الجديد:', state.user.email || '');
+    if (!newEmail || !newEmail.trim()) return;
+    try {
+      await Auth.updateEmail(newEmail.trim());
+      showToast('اتبعتلك رسالة تأكيد على بريدك الجديد، افتحها عشان التغيير يتفعّل', 'success');
+    } catch (err) {
+      showToast(err.message || 'تعذر تحديث البريد الإلكتروني', 'error');
+    }
+  });
+
+  el('btn-change-password').addEventListener('click', async () => {
+    const newPassword = prompt('اكتب كلمة المرور الجديدة (6 أحرف على الأقل):');
+    if (!newPassword || newPassword.length < 6) {
+      if (newPassword) showToast('كلمة المرور لازم تكون 6 أحرف على الأقل', 'error');
+      return;
+    }
+    try {
+      await Auth.updatePassword(newPassword);
+      showToast('تم تغيير كلمة المرور', 'success');
+    } catch (err) {
+      showToast(err.message || 'تعذر تغيير كلمة المرور', 'error');
+    }
+  });
 }
 
 function restDayId(date) {
@@ -196,15 +342,19 @@ function randomAccentColor() {
 // تحميل البيانات
 // ============================================================
 async function loadEverything() {
-  const [goals, tasks, restDays, weekNotes] = await Promise.all([
+  const [goals, tasks, restDays, weekNotes, userStatsRows, userAchievements, templates] = await Promise.all([
     DB.fetchTable('goals', (g) => g.user_id === state.user.id),
     DB.fetchTable('tasks', (t) => t.user_id === state.user.id),
     DB.fetchTable('rest_days', (r) => r.user_id === state.user.id),
     DB.fetchTable('week_notes', (w) => w.user_id === state.user.id),
+    DB.fetchTable('user_stats', (s) => s.user_id === state.user.id),
+    DB.fetchTable('user_achievements', (a) => a.user_id === state.user.id),
+    DB.fetchTable('templates'),
   ]);
 
   state.goals = goals.sort((a, b) => a.sort_order - b.sort_order);
   state.restDays = new Set(restDays.map((r) => r.rest_date));
+  state.templates = templates.sort((a, b) => (b.uses_count || 0) - (a.uses_count || 0));
 
   state.tasksByDate = {};
   tasks.forEach((t) => {
@@ -213,9 +363,108 @@ async function loadEverything() {
   });
 
   const currentWeekStart = state.weekDates[0];
+  state.allWeekNotes = weekNotes;
   state.weekNotes = weekNotes.find((w) => w.week_start === currentWeekStart) || null;
 
+  state.userStats = userStatsRows[0] || {
+    user_id: state.user.id,
+    xp: 0,
+    coins: 0,
+    best_streak: 0,
+    week_history: [],
+  };
+  state.unlockedAchievementIds = new Set(userAchievements.map((a) => a.achievement_id));
+
+  await closePastWeeksAndAwardCoins();
   renderAll();
+  await checkAndUnlockAchievements();
+  saveAutoBackup(state.user.id, state);
+  renderBackupInfo();
+}
+
+/** يقفل أي أسبوع خلص ولسه مش متسجل، ويحسب Coins ويحدّث best_streak */
+async function closePastWeeksAndAwardCoins() {
+  const todayISO = toISODate(new Date());
+  const allKnownWeekStarts = new Set();
+  Object.keys(state.tasksByDate).forEach((date) => {
+    allKnownWeekStarts.add(getWeekDates(new Date(date))[0]);
+  });
+
+  const { updatedHistory, coinsGained } = closeFinishedWeeks({
+    weekHistory: state.userStats.week_history || [],
+    tasksByDate: state.tasksByDate,
+    goals: state.goals,
+    restDays: state.restDays,
+    allKnownWeekStarts,
+    todayISO,
+  });
+
+  const stats = computeGlobalStats({
+    tasksByDate: state.tasksByDate,
+    goals: state.goals,
+    restDays: state.restDays,
+    todayISO,
+    bestStreakSaved: state.userStats.best_streak || 0,
+  });
+
+  const needsSave = coinsGained > 0 || stats.bestStreak > (state.userStats.best_streak || 0) || stats.totalPointsEarned !== state.userStats.xp;
+
+  state.userStats = {
+    ...state.userStats,
+    xp: stats.totalPointsEarned,
+    coins: (state.userStats.coins || 0) + coinsGained,
+    best_streak: Math.max(stats.bestStreak, state.userStats.best_streak || 0),
+    week_history: updatedHistory,
+  };
+
+  if (needsSave) {
+    await DB.upsertRow('user_stats', state.userStats);
+    if (coinsGained > 0) showToast(`أسبوع اتقفل! كسبت ${coinsGained} عملة 🪙`, 'success');
+  }
+
+  state.computedStats = stats;
+}
+
+/** فحص الإنجازات الجديدة وعرضها واحدة تلو الأخرى بـ Animation */
+async function checkAndUnlockAchievements() {
+  const fullStats = {
+    ...state.computedStats,
+    coins: state.userStats.coins || 0,
+    fullWeeks: countFullWeeks(state.userStats.week_history || []),
+    fullMonths: countFullMonths(state.userStats.week_history || []),
+    goalsCount: state.goals.length,
+    restDaysCount: state.restDays.size,
+    level: state.computedStats.levelInfo.level,
+  };
+
+  const newly = checkNewlyUnlocked(fullStats, state.unlockedAchievementIds);
+  for (const achievement of newly) {
+    state.unlockedAchievementIds.add(achievement.id);
+    await DB.upsertRow('user_achievements', {
+      id: generateId(),
+      user_id: state.user.id,
+      achievement_id: achievement.id,
+    });
+    await showAchievementPopup(achievement);
+  }
+  if (newly.length > 0) renderAchievementsGrid();
+}
+
+function showAchievementPopup(achievement) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'achievement-overlay';
+    overlay.innerHTML = `<div class="achievement-popup">${renderAchievementPopup(achievement)}</div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('achievement-overlay--visible'));
+    setTimeout(() => {
+      overlay.classList.remove('achievement-overlay--visible');
+      setTimeout(() => {
+        overlay.remove();
+        resolve();
+      }, 350);
+    }, 2600);
+  });
 }
 
 // ============================================================
@@ -224,7 +473,8 @@ async function loadEverything() {
 async function handleTaskFieldChange(e) {
   const goalId = e.target.dataset.goalId;
   if (!goalId) return;
-  const date = state.selectedDate;
+  const dateContainer = e.target.closest('[data-tasks-date]');
+  const date = dateContainer ? dateContainer.dataset.tasksDate : state.selectedDate;
   const goal = state.goals.find((g) => g.id === goalId);
   if (!goal) return;
 
@@ -258,11 +508,23 @@ async function handleTaskFieldChange(e) {
   await DB.upsertRow('tasks', task);
 
   if (e.target.classList.contains('js-task-toggle')) {
+    const inModal = dateContainer && dateContainer.id === 'day-modal-tasks';
+    if (inModal) refreshModalTasks(date);
     renderAll();
     if (task.is_completed) celebrateTaskDone();
+    await checkAndUnlockAchievements();
   } else {
     renderHero(); // تحديث الأرقام فقط بدون إعادة رسم كل البطاقات
   }
+}
+
+/** تحديث بطاقات المهام داخل مودال تفاصيل اليوم بعد أي تعديل */
+function refreshModalTasks(date) {
+  const container = document.getElementById('day-modal-tasks');
+  if (!container) return;
+  const activeGoals = state.goals.filter((g) => g.is_active);
+  const dayTasks = state.tasksByDate[date] || {};
+  container.innerHTML = activeGoals.map((g) => renderTaskCard(g, dayTasks[g.id])).join('');
 }
 
 function celebrateTaskDone() {
@@ -312,6 +574,7 @@ async function saveWeekNotes() {
   notes.next_improvement = el('week-note-improve').value;
   notes.general_notes = el('week-note-general').value;
   state.weekNotes = notes;
+  state.allWeekNotes = [...state.allWeekNotes.filter((w) => w.week_start !== weekStart), notes];
   await DB.upsertRow('week_notes', notes);
 }
 
@@ -370,11 +633,38 @@ function renderAll() {
   renderGoalsManager();
   renderTasksForSelectedDay();
   renderWeekNotesFields();
+  renderAchievementsGrid();
+  renderCalendar();
+  renderHeatmapSection();
+  renderSearchFilterOptions();
+  renderReports();
+  renderComparison();
+  renderYearGoalsProgress();
+  renderExplore();
+}
+
+function recomputeStats() {
+  state.computedStats = computeGlobalStats({
+    tasksByDate: state.tasksByDate,
+    goals: state.goals,
+    restDays: state.restDays,
+    todayISO: toISODate(new Date()),
+    bestStreakSaved: state.userStats.best_streak || 0,
+  });
+  state.userStats.xp = state.computedStats.totalPointsEarned;
+  state.userStats.best_streak = Math.max(state.computedStats.bestStreak, state.userStats.best_streak || 0);
 }
 
 function renderHero() {
+  recomputeStats();
   const totals = computeWeekTotals();
   el('compass-container').innerHTML = renderCompass(totals.percentage, totals.pointsEarned, totals.pointsTotal);
+  el('level-bar-container').innerHTML = renderLevelBar(state.computedStats.levelInfo);
+  el('streak-coins-container').innerHTML = renderStreakAndCoins(
+    state.computedStats.currentStreak,
+    state.userStats.best_streak,
+    state.userStats.coins || 0
+  );
 
   const completionMap = {};
   state.weekDates.forEach((d) => {
@@ -410,6 +700,7 @@ function renderGoalsManager() {
 
 function renderTasksForSelectedDay() {
   const activeGoals = state.goals.filter((g) => g.is_active);
+  el('tasks-container').setAttribute('data-tasks-date', state.selectedDate);
   if (activeGoals.length === 0) {
     el('tasks-container').innerHTML = emptyState('أضف أهدافك أولًا من قسم "إدارة الأهداف" بالأسفل');
     return;
@@ -432,6 +723,441 @@ function renderWeekNotesFields() {
 
 function emptyState(message) {
   return `<div class="empty-state">${message}</div>`;
+}
+
+function renderAchievementsGrid() {
+  const container = el('achievements-grid');
+  if (!container) return;
+  container.innerHTML = ACHIEVEMENTS.map((a) =>
+    renderAchievementCard(a, state.unlockedAchievementIds.has(a.id))
+  ).join('');
+  el('achievements-count').textContent = `${state.unlockedAchievementIds.size} / ${ACHIEVEMENTS.length}`;
+}
+
+// ============================================================
+// التقويم التفاعلي (Calendar View)
+// ============================================================
+/** نفس حساب نسبة اليوم، لكن يرجّع null للأيام المستقبلية عشان مايتلوّنوش كأنها "فايتة" */
+function dayCompletionForDisplay(date) {
+  const todayISO = toISODate(new Date());
+  if (date > todayISO) return null;
+  return computeDayCompletion(date);
+}
+
+function renderCalendar() {
+  const cells = getMonthGrid(state.calendarYear, state.calendarMonth);
+  el('calendar-container').innerHTML = renderCalendarGrid(cells, dayCompletionForDisplay, state.restDays, toISODate(new Date()));
+  el('calendar-label').textContent = `${ARABIC_MONTHS[state.calendarMonth]} ${state.calendarYear}`;
+  document.querySelectorAll('.cal-cell[data-date]').forEach((btn) => {
+    btn.addEventListener('click', () => openDayModal(btn.dataset.date));
+  });
+}
+
+function changeCalendarMonth(delta) {
+  let m = state.calendarMonth + delta;
+  let y = state.calendarYear;
+  if (m < 0) { m = 11; y -= 1; }
+  if (m > 11) { m = 0; y += 1; }
+  state.calendarMonth = m;
+  state.calendarYear = y;
+  renderCalendar();
+}
+
+/** مودال تفاصيل اليوم — يُستخدم عند الضغط على أي يوم في التقويم */
+function openDayModal(date) {
+  state.modalDate = date;
+  const activeGoals = state.goals.filter((g) => g.is_active);
+  const dayTasks = state.tasksByDate[date] || {};
+  const isRest = state.restDays.has(date);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'day-modal-overlay';
+  overlay.id = 'day-modal-overlay';
+  overlay.innerHTML = `
+    <div class="day-modal">
+      <div class="day-modal__header">
+        <h3>${formatArabicDate(date)}</h3>
+        <button class="icon-btn" id="btn-close-day-modal">✕</button>
+      </div>
+      ${isRest ? '<p class="rest-day-banner">🌿 هذا يوم راحة</p>' : ''}
+      <div id="day-modal-tasks" data-tasks-date="${date}">
+        ${activeGoals.length === 0 ? emptyState('لا توجد أهداف بعد') : activeGoals.map((g) => renderTaskCard(g, dayTasks[g.id])).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('day-modal-overlay--visible'));
+
+  el('btn-close-day-modal').addEventListener('click', closeDayModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDayModal(); });
+
+  const tasksEl = document.getElementById('day-modal-tasks');
+  tasksEl.addEventListener('change', handleTaskFieldChange);
+  tasksEl.addEventListener(
+    'input',
+    debounce((e) => {
+      if (e.target.classList.contains('js-task-notes')) handleTaskFieldChange(e);
+    }, 500)
+  );
+}
+
+function closeDayModal() {
+  const overlay = document.getElementById('day-modal-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('day-modal-overlay--visible');
+  setTimeout(() => overlay.remove(), 250);
+  state.modalDate = null;
+}
+
+// ============================================================
+// Heatmap السنوي
+// ============================================================
+function renderHeatmapSection() {
+  const weeks = buildHeatmapWeeks(state.heatmapYear);
+  el('heatmap-container').innerHTML = renderHeatmap(weeks, state.heatmapYear, dayCompletionForDisplay, state.restDays);
+  el('heatmap-year-label').textContent = String(state.heatmapYear);
+}
+
+function changeHeatmapYear(delta) {
+  state.heatmapYear += delta;
+  renderHeatmapSection();
+}
+
+// ============================================================
+// البحث والفلاتر
+// ============================================================
+function renderSearchFilterOptions() {
+  const select = el('search-goal-filter');
+  const current = select.value;
+  select.innerHTML =
+    '<option value="">كل الأهداف</option>' +
+    state.goals.map((g) => `<option value="${g.id}">${g.name}</option>`).join('');
+  if (state.goals.some((g) => g.id === current)) select.value = current;
+}
+
+function performSearch() {
+  const query = el('search-input').value.trim().toLowerCase();
+  const goalFilter = el('search-goal-filter').value;
+  if (!query) {
+    el('search-results').innerHTML = emptyState('اكتب كلمة للبحث داخل الأهداف والملاحظات والأسابيع');
+    return;
+  }
+
+  const results = [];
+
+  state.goals.forEach((g) => {
+    if (goalFilter && g.id !== goalFilter) return;
+    if (g.name.toLowerCase().includes(query)) {
+      results.push({ type: 'goal', title: g.name, snippet: `${g.points} نقطة لكل إنجاز`, date: null });
+    }
+  });
+
+  Object.entries(state.tasksByDate).forEach(([date, dayTasks]) => {
+    Object.values(dayTasks).forEach((task) => {
+      if (goalFilter && task.goal_id !== goalFilter) return;
+      if (task.notes && task.notes.toLowerCase().includes(query)) {
+        const goal = state.goals.find((g) => g.id === task.goal_id);
+        results.push({ type: 'task', title: goal?.name || 'مهمة', snippet: task.notes.slice(0, 90), date });
+      }
+    });
+  });
+
+  if (!goalFilter) {
+    state.allWeekNotes.forEach((w) => {
+      const combined = [w.best_thing, w.worst_thing, w.biggest_challenge, w.next_improvement, w.general_notes]
+        .filter(Boolean)
+        .join(' — ');
+      if (combined.toLowerCase().includes(query)) {
+        results.push({
+          type: 'week_note',
+          title: `ملاحظات أسبوع ${formatArabicDate(w.week_start)}`,
+          snippet: combined.slice(0, 90),
+          date: w.week_start,
+        });
+      }
+    });
+  }
+
+  el('search-results').innerHTML = results.length ? results.map(renderSearchResult).join('') : emptyState('لا توجد نتائج مطابقة');
+  document.querySelectorAll('.search-result').forEach((btn) => {
+    const date = btn.dataset.date;
+    if (date) btn.addEventListener('click', () => openDayModal(date));
+  });
+}
+
+// ============================================================
+// التقارير التلقائية (أسبوعي / شهري / ربع سنوي / سنوي)
+// ============================================================
+function switchReportTab(tab) {
+  state.reportTab = tab;
+  document.querySelectorAll('.js-report-tab').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.tab === tab);
+  });
+  renderReports();
+}
+
+function navigateReport(delta) {
+  if (state.reportTab === 'week') {
+    state.reportWeek = addDaysLocal(state.reportWeek, delta * 7);
+  } else if (state.reportTab === 'month') {
+    let m = state.reportMonth.month + delta;
+    let y = state.reportMonth.year;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    state.reportMonth = { year: y, month: m };
+  } else if (state.reportTab === 'quarter') {
+    let q = state.reportQuarter.quarter + delta;
+    let y = state.reportQuarter.year;
+    if (q < 0) { q = 3; y -= 1; }
+    if (q > 3) { q = 0; y += 1; }
+    state.reportQuarter = { year: y, quarter: q };
+  } else {
+    state.reportYear += delta;
+  }
+  renderReports();
+}
+
+function addDaysLocal(iso, delta) {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + delta);
+  return toISODate(d);
+}
+
+function renderReports() {
+  const goals = state.goals.filter((g) => g.is_active);
+  let report;
+  let label;
+  let chartLabels = [];
+  let chartData = [];
+
+  if (state.reportTab === 'week') {
+    report = buildWeekReport(state.reportWeek, goals, state.tasksByDate, state.restDays);
+    label = `${formatArabicDate(state.reportWeek)} — ${formatArabicDate(addDaysLocal(state.reportWeek, 6))}`;
+    chartLabels = DAY_NAMES_AR;
+    chartData = state.weekDates.map((_, i) => {
+      const date = addDaysLocal(state.reportWeek, i);
+      const p = report.dayPercentages[date];
+      return p === null || p === undefined ? 0 : p;
+    });
+  } else if (state.reportTab === 'month') {
+    report = buildMonthReport(state.reportMonth.year, state.reportMonth.month, goals, state.tasksByDate, state.restDays);
+    label = report.label;
+    chartLabels = report.weeks.map((w, i) => `أسبوع ${i + 1}`);
+    chartData = report.weeks.map((w) => w.percentage);
+  } else if (state.reportTab === 'quarter') {
+    report = buildQuarterReport(state.reportQuarter.year, state.reportQuarter.quarter, goals, state.tasksByDate, state.restDays);
+    label = report.label;
+    chartLabels = report.monthStats.map((m) => m.label);
+    chartData = report.monthStats.map((m) => m.percentage);
+  } else {
+    report = buildYearReport(state.reportYear, goals, state.tasksByDate, state.restDays);
+    label = report.label;
+    chartLabels = report.monthStats.map((m) => m.label);
+    chartData = report.monthStats.map((m) => m.percentage);
+  }
+
+  el('report-period-label').textContent = label;
+  el('report-content').innerHTML = renderReportCard(report, formatArabicDate);
+  renderTrendChart('report-trend-chart', chartLabels, chartData);
+}
+
+// ============================================================
+// مقارنة الأداء
+// ============================================================
+function renderComparison() {
+  const goals = state.goals.filter((g) => g.is_active);
+  const thisWeek = buildWeekReport(getWeekDates(new Date())[0], goals, state.tasksByDate, state.restDays);
+  const lastWeek = buildWeekReport(addDaysLocal(getWeekDates(new Date())[0], -7), goals, state.tasksByDate, state.restDays);
+  const thisMonth = buildMonthReport(new Date().getFullYear(), new Date().getMonth(), goals, state.tasksByDate, state.restDays);
+  const thisYear = buildYearReport(new Date().getFullYear(), goals, state.tasksByDate, state.restDays);
+
+  const rows = [
+    { label: 'هذا الأسبوع مقابل الأسبوع الماضي', current: thisWeek.percentage, previous: lastWeek.percentage },
+    { label: 'هذا الشهر مقابل الشهر الماضي', current: thisMonth.percentage, previous: thisMonth.previousPercentage },
+    { label: 'هذه السنة مقابل السنة الماضية', current: thisYear.percentage, previous: thisYear.previousPercentage },
+  ];
+
+  el('comparison-container').innerHTML = rows
+    .map((r) => {
+      const diff = r.current - r.previous;
+      const isUp = diff >= 0;
+      return `
+        <div class="compare-row">
+          <span class="compare-row__label">${r.label}</span>
+          <span class="compare-row__values">${r.previous}% → ${r.current}%</span>
+          <span class="compare-row__diff ${isUp ? 'compare-row__diff--up' : 'compare-row__diff--down'}">
+            ${isUp ? '▲' : '▼'} ${Math.abs(diff)}%
+          </span>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+// ============================================================
+// تقدم الأهداف خلال السنة
+// ============================================================
+function renderYearGoalsProgress() {
+  const goals = state.goals.filter((g) => g.is_active);
+  const year = new Date().getFullYear();
+  const report = buildYearReport(year, goals, state.tasksByDate, state.restDays);
+  el('year-goals-container').innerHTML = renderGoalYearProgress(report.goalsYearProgress);
+}
+
+// ============================================================
+// صفحة Explore (مشاركة القوالب)
+// ============================================================
+function renderExplore() {
+  const container = el('explore-list');
+  if (!state.templates.length) {
+    container.innerHTML = emptyState('لا توجد قوالب منشورة بعد، كن أول من يشارك قالبًا!');
+    return;
+  }
+  container.innerHTML = state.templates
+    .map((t) => renderTemplateCard(t, t.user_id === state.user.id))
+    .join('');
+
+  document.querySelectorAll('.js-copy-template').forEach((btn) => {
+    btn.addEventListener('click', () => copyTemplateToMyAccount(btn.dataset.templateId));
+  });
+}
+
+async function shareCurrentGoalsAsTemplate() {
+  const title = el('template-title').value.trim();
+  const description = el('template-description').value.trim();
+  const activeGoals = state.goals.filter((g) => g.is_active);
+  if (!title) return showToast('اكتب اسم للقالب أولًا', 'error');
+  if (activeGoals.length === 0) return showToast('أضف أهداف أولًا عشان تقدر تشاركها', 'error');
+
+  const template = {
+    id: generateId(),
+    user_id: state.user.id,
+    title,
+    description,
+    goals: activeGoals.map((g) => ({ name: g.name, points: g.points })),
+    uses_count: 0,
+  };
+  await DB.upsertRow('templates', template);
+  state.templates.unshift(template);
+  el('template-title').value = '';
+  el('template-description').value = '';
+  renderExplore();
+  showToast('تمت مشاركة القالب في Explore 🌍', 'success');
+}
+
+async function copyTemplateToMyAccount(templateId) {
+  const template = state.templates.find((t) => t.id === templateId);
+  if (!template) return;
+
+  const newGoals = (template.goals || []).map((g, i) => ({
+    id: generateId(),
+    user_id: state.user.id,
+    name: g.name,
+    points: g.points || 10,
+    color: ['#2DD4BF', '#F5B942', '#FF6B5C', '#7C9CFF', '#B98CF0', '#4ADE80'][i % 6],
+    is_active: true,
+    sort_order: state.goals.length + i,
+  }));
+
+  for (const g of newGoals) {
+    state.goals.push(g);
+    await DB.upsertRow('goals', g);
+  }
+
+  try {
+    await supabaseClient.rpc('increment_template_uses', { template_id: templateId });
+    template.uses_count = (template.uses_count || 0) + 1;
+  } catch (err) {
+    console.warn('تعذر تحديث عداد الاستخدام', err);
+  }
+
+  renderAll();
+  showToast(`تم نسخ ${newGoals.length} هدف لحسابك 🎯`, 'success');
+}
+
+// ============================================================
+// النسخ الاحتياطي (Export / Import / Auto Backup)
+// ============================================================
+function renderBackupInfo() {
+  const info = getAutoBackupInfo(state.user.id);
+  el('auto-backup-info').textContent = info
+    ? `آخر نسخة تلقائية: ${new Date(info.exportedAt).toLocaleString('ar-EG')}`
+    : 'لا توجد نسخة تلقائية بعد';
+}
+
+function handleExport() {
+  const payload = buildExportPayload(state);
+  downloadJSON(payload, `goaltrack-backup-${toISODate(new Date())}.json`);
+  showToast('تم تصدير بياناتك بنجاح', 'success');
+}
+
+async function handleImportFile(file) {
+  try {
+    const payload = await readImportFile(file);
+    for (const g of payload.goals || []) {
+      await DB.upsertRow('goals', { ...g, user_id: state.user.id });
+    }
+    for (const t of payload.tasks || []) {
+      await DB.upsertRow('tasks', { ...t, user_id: state.user.id });
+    }
+    for (const d of payload.restDays || []) {
+      await DB.upsertRow('rest_days', { id: `${state.user.id}-${d}`, user_id: state.user.id, rest_date: d, note: '' });
+    }
+    for (const w of payload.weekNotes || []) {
+      await DB.upsertRow('week_notes', { ...w, user_id: state.user.id });
+    }
+    if (payload.userStats) {
+      await DB.upsertRow('user_stats', { ...payload.userStats, user_id: state.user.id });
+    }
+    for (const achievementId of payload.unlockedAchievements || []) {
+      await DB.upsertRow('user_achievements', { id: generateId(), user_id: state.user.id, achievement_id: achievementId });
+    }
+    showToast('تم استيراد البيانات بنجاح، جاري إعادة التحميل...', 'success');
+    await loadEverything();
+  } catch (err) {
+    showToast('تعذر استيراد الملف: ' + err.message, 'error');
+  }
+}
+
+async function handleRestoreAutoBackup() {
+  const info = getAutoBackupInfo(state.user.id);
+  if (!info) return showToast('لا توجد نسخة تلقائية محفوظة', 'error');
+  if (!confirm('هل تريد استعادة آخر نسخة احتياطية تلقائية؟ هيتم دمجها مع بياناتك الحالية.')) return;
+  await handleImportFromPayload(info.payload);
+}
+
+async function handleImportFromPayload(payload) {
+  for (const g of payload.goals || []) await DB.upsertRow('goals', { ...g, user_id: state.user.id });
+  for (const t of payload.tasks || []) await DB.upsertRow('tasks', { ...t, user_id: state.user.id });
+  for (const w of payload.weekNotes || []) await DB.upsertRow('week_notes', { ...w, user_id: state.user.id });
+  if (payload.userStats) await DB.upsertRow('user_stats', { ...payload.userStats, user_id: state.user.id });
+  showToast('تم استرجاع النسخة الاحتياطية', 'success');
+  await loadEverything();
+}
+
+// ============================================================
+// صفحة حسابي (Profile)
+// ============================================================
+function renderProfilePage() {
+  const user = state.user;
+  if (!user) return;
+
+  const provider = user.app_metadata?.provider || 'email';
+  const isGoogle = provider === 'google';
+  const fullName = user.user_metadata?.full_name || 'بدون اسم';
+
+  el('profile-avatar').textContent = fullName.trim().charAt(0).toUpperCase() || '؟';
+  el('profile-name').textContent = fullName;
+  el('profile-email').textContent = user.email || '—';
+  el('profile-created').textContent = user.created_at ? formatArabicDate(user.created_at.slice(0, 10)) : '—';
+  el('profile-last-login').textContent = user.last_sign_in_at ? formatArabicDate(user.last_sign_in_at.slice(0, 10)) : '—';
+
+  recomputeStats();
+  el('profile-level').textContent = `المستوى ${state.computedStats.levelInfo.level}`;
+
+  el('profile-google-notice').classList.toggle('hidden', !isGoogle);
+  el('btn-change-password').classList.toggle('hidden', isGoogle);
+  el('btn-change-email').classList.toggle('hidden', isGoogle);
 }
 
 // ============================================================

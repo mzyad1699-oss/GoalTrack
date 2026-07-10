@@ -1,8 +1,83 @@
-import { DAY_NAMES_AR, formatArabicDate } from './utils.js';
+import { DAY_NAMES_AR, formatArabicDate, ARABIC_MONTHS } from './utils.js';
 
 // ============================================================
 // مكونات واجهة قابلة لإعادة الاستخدام
 // ============================================================
+
+/** شبكة تقويم شهرية تفاعلية */
+export function renderCalendarGrid(cells, dayCompletionFn, restDays, todayISO) {
+  const headerRow = DAY_NAMES_AR.map((d) => `<div class="cal-weekday">${d}</div>`).join('');
+  const dayCells = cells
+    .map((date) => {
+      if (!date) return `<div class="cal-cell cal-cell--empty"></div>`;
+      const isRest = restDays.has(date);
+      const completion = dayCompletionFn(date);
+      let cls = 'cal-cell';
+      if (isRest) cls += ' cal-cell--rest';
+      else if (completion === 100) cls += ' cal-cell--full';
+      else if (completion > 0) cls += ' cal-cell--partial';
+      if (date === todayISO) cls += ' cal-cell--today';
+      const dayNum = date.slice(-2).replace(/^0/, '');
+      return `<button class="${cls}" data-date="${date}">${dayNum}</button>`;
+    })
+    .join('');
+  return `<div class="cal-grid">${headerRow}${dayCells}</div>`;
+}
+
+/** Heatmap سنوي بأسلوب GitHub */
+export function renderHeatmap(weeks, year, dayCompletionFn, restDays) {
+  const cellSize = 11;
+  const gap = 3;
+  const width = weeks.length * (cellSize + gap);
+  const height = 7 * (cellSize + gap) + 20;
+
+  let monthLabels = '';
+  let lastMonth = -1;
+  weeks.forEach((week, wi) => {
+    const firstOfMonth = week.find((d) => d.slice(0, 4) === String(year) && Number(d.slice(-2)) <= 7);
+    if (firstOfMonth) {
+      const month = Number(firstOfMonth.slice(5, 7)) - 1;
+      if (month !== lastMonth) {
+        monthLabels += `<text x="${wi * (cellSize + gap)}" y="10" class="heatmap-month-label">${ARABIC_MONTHS[month]}</text>`;
+        lastMonth = month;
+      }
+    }
+  });
+
+  let cells = '';
+  weeks.forEach((week, wi) => {
+    week.forEach((date, di) => {
+      if (date.slice(0, 4) !== String(year)) return; // إخفاء أيام خارج السنة
+      const isRest = restDays.has(date);
+      const completion = dayCompletionFn(date);
+      let levelClass = 'heat-l0';
+      if (isRest) levelClass = 'heat-rest';
+      else if (completion === 100) levelClass = 'heat-l4';
+      else if (completion >= 50) levelClass = 'heat-l3';
+      else if (completion > 0) levelClass = 'heat-l2';
+      else if (completion === 0) levelClass = 'heat-l1';
+
+      const x = wi * (cellSize + gap);
+      const y = di * (cellSize + gap) + 20;
+      cells += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="3" class="heat-cell ${levelClass}"><title>${formatArabicDate(date)} — ${completion === null ? 'لا بيانات' : completion + '%'}</title></rect>`;
+    });
+  });
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="heatmap-svg">${monthLabels}${cells}</svg>`;
+}
+
+/** نتيجة بحث واحدة (مهمة / هدف / ملاحظة أسبوع) */
+export function renderSearchResult(result) {
+  const typeLabel = { task: 'ملاحظة مهمة', goal: 'هدف', week_note: 'ملاحظة أسبوع' }[result.type];
+  return `
+    <button class="search-result" data-date="${result.date || ''}">
+      <span class="search-result__type">${typeLabel}</span>
+      <span class="search-result__title">${result.title}</span>
+      <span class="search-result__snippet">${result.snippet}</span>
+      ${result.date ? `<span class="search-result__date">${formatArabicDate(result.date)}</span>` : ''}
+    </button>
+  `;
+}
 
 /**
  * دائرة التقدم الأسبوعي "بوصلة الرحلة" — العنصر البصري المميز للصفحة الرئيسية
@@ -101,6 +176,138 @@ export function renderTaskCard(goal, task) {
         rows="1"
       >${notes}</textarea>
     </div>
+  `;
+}
+
+/** شبكة إحصائيات عامة لأي تقرير */
+export function renderStatGrid(items) {
+  return `
+    <div class="stat-grid">
+      ${items
+        .map(
+          (it) => `
+        <div class="stat-box">
+          <div class="stat-box__value">${it.value}</div>
+          <div class="stat-box__label">${it.label}</div>
+        </div>`
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+/** بطاقة تقرير كاملة (أسبوعي/شهري/ربعي/سنوي) */
+export function renderReportCard(report, dateFormatter) {
+  const cmp = report.comparison;
+  const cmpHtml = cmp
+    ? `<div class="report-compare ${cmp.isImprovement ? 'report-compare--up' : 'report-compare--down'}">
+         ${cmp.isImprovement ? '▲' : '▼'} ${Math.abs(cmp.diff)}% مقارنة بالفترة السابقة (${report.previousPercentage}%)
+       </div>`
+    : '';
+
+  const stats = [
+    { label: 'نسبة الإنجاز', value: `${report.percentage}%` },
+    { label: 'التقدير', value: report.grade },
+    { label: 'النقاط', value: `${report.pointsEarned} / ${report.pointsTotal}` },
+    { label: 'المهام المنجزة', value: `${report.completedTasks} / ${report.totalTasks}` },
+    { label: 'أيام الراحة', value: report.restDaysCount },
+  ];
+
+  const bestWorstHtml = `
+    <div class="report-row">
+      ${report.bestDay ? `<span>🌟 أفضل يوم: ${dateFormatter(report.bestDay.date)} (${report.bestDay.percentage}%)</span>` : ''}
+      ${report.worstDay ? `<span>📉 أضعف يوم: ${dateFormatter(report.worstDay.date)} (${report.worstDay.percentage}%)</span>` : ''}
+    </div>
+    <div class="report-row">
+      ${report.bestGoal && report.bestGoal.total > 0 ? `<span>🏆 أفضل هدف: ${report.bestGoal.name}</span>` : ''}
+      ${report.worstGoal && report.worstGoal.total > 0 ? `<span>🔻 أقل هدف: ${report.worstGoal.name}</span>` : ''}
+    </div>
+  `;
+
+  return `
+    ${cmpHtml}
+    ${renderStatGrid(stats)}
+    ${bestWorstHtml}
+  `;
+}
+
+/** أشرطة تقدم الأهداف خلال السنة */
+export function renderGoalYearProgress(goalStats) {
+  if (goalStats.length === 0) return `<div class="empty-state">لا توجد أهداف بعد</div>`;
+  return goalStats
+    .map((g) => {
+      const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
+      return `
+        <div class="year-progress-row">
+          <div class="year-progress-row__label"><span>${g.name}</span><span>${pct}%</span></div>
+          <div class="year-progress-row__track"><div class="year-progress-row__fill" style="width:${pct}%"></div></div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/** بطاقة Template داخل صفحة Explore */
+export function renderTemplateCard(template, isMine) {
+  const goalsPreview = (template.goals || []).slice(0, 5).map((g) => g.name).join(' • ');
+  return `
+    <div class="template-card">
+      <div class="template-card__title">${template.title}</div>
+      <div class="template-card__desc">${template.description || ''}</div>
+      <div class="template-card__goals">${goalsPreview}${template.goals?.length > 5 ? ' ...' : ''}</div>
+      <div class="template-card__footer">
+        <span>📋 ${template.goals?.length || 0} أهداف · استُخدم ${template.uses_count || 0} مرة</span>
+        ${isMine ? '' : `<button class="btn btn--primary js-copy-template" data-template-id="${template.id}" style="width:auto;padding:6px 14px;font-size:12px;">نسخ لحسابي</button>`}
+      </div>
+    </div>
+  `;
+}
+
+/** شريط المستوى والخبرة (XP) */
+export function renderLevelBar(levelInfo) {
+  return `
+    <div class="level-bar">
+      <div class="level-bar__badge">Lv ${levelInfo.level}</div>
+      <div class="level-bar__track">
+        <div class="level-bar__fill" style="width:${levelInfo.progressPercent}%"></div>
+      </div>
+      <div class="level-bar__xp">${levelInfo.xpIntoLevel} / ${levelInfo.xpForNextLevel} XP</div>
+    </div>
+  `;
+}
+
+/** شارتا الـ Streak والعملات بجانب بعض */
+export function renderStreakAndCoins(currentStreak, bestStreak, coins) {
+  return `
+    <div class="stat-pill" title="أفضل سلسلة: ${bestStreak} يوم">
+      <span>🔥</span>
+      <span>${currentStreak} يوم متتالي</span>
+    </div>
+    <div class="stat-pill">
+      <span>🪙</span>
+      <span>${coins} عملة</span>
+    </div>
+  `;
+}
+
+/** بطاقة إنجاز مفردة داخل شبكة الإنجازات */
+export function renderAchievementCard(achievement, isUnlocked) {
+  return `
+    <div class="achievement-card ${isUnlocked ? 'achievement-card--unlocked' : 'achievement-card--locked'}">
+      <div class="achievement-card__icon">${achievement.icon}</div>
+      <div class="achievement-card__name">${achievement.name}</div>
+      <div class="achievement-card__desc">${achievement.desc}</div>
+    </div>
+  `;
+}
+
+/** نافذة منبثقة عند فتح إنجاز جديد + Animation */
+export function renderAchievementPopup(achievement) {
+  return `
+    <div class="achievement-popup__icon">${achievement.icon}</div>
+    <div class="achievement-popup__label">إنجاز جديد!</div>
+    <div class="achievement-popup__name">${achievement.name}</div>
+    <div class="achievement-popup__desc">${achievement.desc}</div>
   `;
 }
 

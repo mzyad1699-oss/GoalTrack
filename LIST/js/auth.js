@@ -47,6 +47,18 @@ export const Auth = {
     if (error) throw error;
   },
 
+  /** تحديث اسم المستخدم (في بيانات الحساب فقط) */
+  async updateName(newName) {
+    const { error } = await supabaseClient.auth.updateUser({ data: { full_name: newName } });
+    if (error) throw error;
+  },
+
+  /** تحديث البريد الإلكتروني (هيرسل لينك تأكيد على الإيميل الجديد) */
+  async updateEmail(newEmail) {
+    const { error } = await supabaseClient.auth.updateUser({ email: newEmail });
+    if (error) throw error;
+  },
+
   /** تحديث كلمة المرور (بعد الضغط على رابط الإيميل) */
   async updatePassword(newPassword) {
     const { error } = await supabaseClient.auth.updateUser({ password: newPassword });

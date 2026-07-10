@@ -74,6 +74,57 @@ export function showToast(message, type = 'success') {
   }, 3200);
 }
 
+export const ARABIC_MONTHS = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+
+/**
+ * بناء شبكة أيام شهر معيّن (بدءًا من السبت)، تُرجع مصفوفة خلايا
+ * كل خلية إما تاريخ ISO أو null لو خارج الشهر
+ */
+export function getMonthGrid(year, monthIndex) {
+  const firstDay = new Date(year, monthIndex, 1);
+  const lastDay = new Date(year, monthIndex + 1, 0);
+  const startOffset = (firstDay.getDay() + 1) % 7; // محاذاة بحيث السبت = أول عمود
+  const daysInMonth = lastDay.getDate();
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(toISODate(new Date(year, monthIndex, d)));
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+/**
+ * بناء أسابيع كاملة (7 أيام) تغطي سنة معيّنة بالكامل — أساس الـ Heatmap
+ * بعض تواريخ الأسبوع الأول/الأخير ممكن تكون خارج السنة (هيتم إخفاؤها في الرسم)
+ */
+export function buildHeatmapWeeks(year) {
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
+
+  const startOffset = (yearStart.getDay() + 1) % 7;
+  const gridStart = new Date(yearStart);
+  gridStart.setDate(yearStart.getDate() - startOffset);
+
+  const endOffset = 6 - ((yearEnd.getDay() + 1) % 7);
+  const gridEnd = new Date(yearEnd);
+  gridEnd.setDate(yearEnd.getDate() + endOffset);
+
+  const weeks = [];
+  const cursor = new Date(gridStart);
+  while (cursor <= gridEnd) {
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      week.push(toISODate(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
 /** Debounce بسيط لتقليل عدد مرات الحفظ أثناء الكتابة في الملاحظات */
 export function debounce(fn, delay = 500) {
   let timer;
@@ -81,4 +132,10 @@ export function debounce(fn, delay = 500) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+export function addDays(date, days) {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
 }

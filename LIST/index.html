@@ -72,10 +72,28 @@
       </div>
     </div>
 
+    <!-- شريط الـ Tabs -->
+    <div class="tab-bar" id="tab-bar"></div>
+
+    <!-- ============ صفحة الرئيسية ============ -->
+    <div class="page" id="page-home" data-page="home">
+
     <!-- البوصلة + مسار الأيام -->
     <section class="hero-card">
+      <div id="level-bar-container" class="level-bar-wrap"></div>
       <div id="compass-container"></div>
+      <div id="streak-coins-container" class="stat-pills-row"></div>
       <div id="day-path-container"></div>
+    </section>
+
+    <!-- البحث -->
+    <section class="section-card" id="search-section">
+      <h2>البحث <small>داخل الأهداف والملاحظات وملاحظات الأسابيع</small></h2>
+      <div class="search-row">
+        <input type="text" id="search-input" placeholder="ابحث..." />
+        <select id="search-goal-filter"></select>
+      </div>
+      <div id="search-results"></div>
     </section>
 
     <!-- الرسم البياني الأسبوعي -->
@@ -115,16 +133,168 @@
         <div class="field" style="grid-column: 1 / -1;"><label>ملاحظات عامة</label><textarea id="week-note-general"></textarea></div>
       </div>
     </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الرئيسية ============ -->
+
+    <!-- ============ صفحة التقويم ============ -->
+    <div class="page hidden" id="page-calendar" data-page="calendar">
+
+    <!-- التقويم التفاعلي -->
+    <section class="section-card" id="calendar-section">
+      <h2>
+        <span id="calendar-label"></span>
+        <span>
+          <button class="icon-btn" id="btn-cal-prev">‹</button>
+          <button class="icon-btn" id="btn-cal-next">›</button>
+        </span>
+      </h2>
+      <div id="calendar-container"></div>
+    </section>
+
+    <!-- Heatmap السنوي -->
+    <section class="section-card" id="heatmap-section">
+      <h2>
+        خريطة الإنتاجية <span id="heatmap-year-label"></span>
+        <span>
+          <button class="icon-btn" id="btn-heatmap-prev">‹</button>
+          <button class="icon-btn" id="btn-heatmap-next">›</button>
+        </span>
+      </h2>
+      <div id="heatmap-container" class="heatmap-scroll"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة التقويم ============ -->
+
+    <!-- ============ صفحة الإحصائيات ============ -->
+    <div class="page hidden" id="page-stats" data-page="stats">
+
+    <!-- التقارير التلقائية -->
+    <section class="section-card" id="reports-section">
+      <h2>التقارير</h2>
+      <div class="report-tabs">
+        <button class="js-report-tab is-active" data-tab="week">أسبوعي</button>
+        <button class="js-report-tab" data-tab="month">شهري</button>
+        <button class="js-report-tab" data-tab="quarter">ربع سنوي</button>
+        <button class="js-report-tab" data-tab="year">سنوي</button>
+      </div>
+      <div class="report-nav">
+        <button class="icon-btn" id="btn-report-prev">‹</button>
+        <span id="report-period-label" class="report-period-label"></span>
+        <button class="icon-btn" id="btn-report-next">›</button>
+      </div>
+      <div id="report-content"></div>
+      <div class="chart-wrap" style="margin-top:14px;"><canvas id="report-trend-chart"></canvas></div>
+    </section>
+
+    <!-- مقارنة الأداء -->
+    <section class="section-card" id="comparison-section">
+      <h2>مقارنة الأداء</h2>
+      <div id="comparison-container"></div>
+    </section>
+
+    <!-- أهداف السنة -->
+    <section class="section-card" id="year-goals-section">
+      <h2>تقدّم أهدافك خلال السنة</h2>
+      <div id="year-goals-container"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الإحصائيات ============ -->
+
+    <!-- ============ صفحة الإنجازات ============ -->
+    <div class="page hidden" id="page-achievements" data-page="achievements">
+
+    <section class="section-card" id="achievements-section">
+      <h2>الإنجازات <small id="achievements-count">0 / 0</small></h2>
+      <div id="achievements-grid" class="achievements-grid"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الإنجازات ============ -->
+
+    <!-- ============ صفحة استكشاف ============ -->
+    <div class="page hidden" id="page-explore" data-page="explore">
+
+    <!-- Explore: مشاركة القوالب -->
+    <section class="section-card" id="explore-section">
+      <h2>استكشاف <small>شارك أهدافك كقالب جاهز، أو انسخ قالب حد تاني</small></h2>
+      <div class="add-goal-row">
+        <input type="text" id="template-title" placeholder="اسم القالب (مثال: خطة تعلم البرمجة)" />
+        <input type="text" id="template-description" placeholder="وصف مختصر (اختياري)" />
+        <button id="btn-share-template" class="btn btn--primary" style="width:auto; padding:10px 20px;">🌍 شارك أهدافي الحالية</button>
+      </div>
+      <div id="explore-list" class="explore-grid"></div>
+    </section>
+
+    <!-- النسخ الاحتياطي -->
+    <section class="section-card" id="backup-section">
+      <h2>النسخ الاحتياطي</h2>
+      <p id="auto-backup-info" class="backup-info"></p>
+      <div class="backup-actions">
+        <button id="btn-export" class="btn btn--ghost">⬇️ تصدير بياناتي (JSON)</button>
+        <label class="btn btn--ghost" for="import-file-input" style="cursor:pointer;">⬆️ استيراد ملف JSON</label>
+        <input type="file" id="import-file-input" accept="application/json" class="hidden" />
+        <button id="btn-restore-backup" class="btn btn--ghost">↺ استعادة آخر نسخة تلقائية</button>
+      </div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة استكشاف ============ -->
+
+    <!-- ============ صفحة حسابي (Profile) — خارج نظام الـ Tabs ============ -->
+    <div class="page page--profile hidden" id="page-profile">
+      <button class="btn btn--ghost profile-back-btn" id="btn-profile-back">→ رجوع</button>
+
+      <div class="profile-header">
+        <div class="profile-avatar" id="profile-avatar">؟</div>
+        <div>
+          <div class="profile-header__name" id="profile-name"></div>
+          <div class="profile-header__email" id="profile-email"></div>
+        </div>
+      </div>
+
+      <section class="section-card">
+        <h2>معلومات الحساب</h2>
+        <div class="profile-info-grid">
+          <div class="profile-info-item"><span>تاريخ إنشاء الحساب</span><strong id="profile-created"></strong></div>
+          <div class="profile-info-item"><span>آخر تسجيل دخول</span><strong id="profile-last-login"></strong></div>
+          <div class="profile-info-item"><span>مستوى الحساب</span><strong id="profile-level"></strong></div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <h2>إعدادات الحساب</h2>
+        <p id="profile-google-notice" class="profile-google-notice hidden">🔒 حسابك مسجّل بواسطة جوجل، فكلمة المرور بتتدار من هناك مباشرة.</p>
+        <div class="profile-actions">
+          <button id="btn-change-name" class="btn btn--ghost">✏️ تغيير الاسم</button>
+          <button id="btn-change-email" class="btn btn--ghost">✉️ تغيير البريد الإلكتروني</button>
+          <button id="btn-change-password" class="btn btn--ghost">🔑 تغيير كلمة المرور</button>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <h2>إدارة الحسابات</h2>
+        <div class="profile-actions">
+          <button id="btn-profile-logout" class="btn btn--ghost">🚪 تسجيل الخروج</button>
+          <button id="btn-switch-account" class="btn btn--ghost">🔄 تسجيل الدخول بحساب آخر</button>
+          <button id="btn-new-account" class="btn btn--ghost">➕ إنشاء حساب جديد</button>
+        </div>
+      </section>
+    </div>
+    <!-- ============ نهاية صفحة حسابي ============ -->
   </main>
 
   <aside class="sidebar">
     <div class="sidebar-logo">GoalTrack</div>
-    <ul class="nav-list">
-      <li class="nav-item is-active">🧭 الرئيسية</li>
-      <li class="nav-item">📅 التقويم <span class="nav-item__soon">قريبًا</span></li>
-      <li class="nav-item">📊 الإحصائيات <span class="nav-item__soon">قريبًا</span></li>
-      <li class="nav-item">🏆 الإنجازات <span class="nav-item__soon">قريبًا</span></li>
-      <li class="nav-item">🌍 استكشاف <span class="nav-item__soon">قريبًا</span></li>
+    <ul class="nav-list" id="nav-list">
+      <li class="nav-item is-active" data-page="home">🧭 الرئيسية</li>
+      <li class="nav-item" data-page="calendar">📅 التقويم</li>
+      <li class="nav-item" data-page="stats">📊 الإحصائيات</li>
+      <li class="nav-item" data-page="achievements">🏆 الإنجازات</li>
+      <li class="nav-item" data-page="explore">🌍 استكشاف</li>
+      <li class="nav-item" id="nav-profile">👤 حسابي</li>
     </ul>
     <div class="sidebar-footer">
       <button id="btn-logout" class="btn btn--ghost">تسجيل الخروج</button>

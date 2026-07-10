@@ -6,8 +6,8 @@ import supabaseClient from './supabaseClient.js';
 // ============================================================
 
 const DB_NAME = 'goaltrack_cache';
-const DB_VERSION = 1;
-const STORES = ['goals', 'tasks', 'rest_days', 'week_notes', 'sync_queue'];
+const DB_VERSION = 2; // تم رفعها بعد إضافة جداول المراحل 2 و3 و6 — لازم ترفع مرة تانية لو ضفت جدول جديد
+const STORES = ['goals', 'tasks', 'rest_days', 'week_notes', 'user_stats', 'user_achievements', 'templates', 'profiles', 'sync_queue'];
 
 let idbInstance = null;
 
