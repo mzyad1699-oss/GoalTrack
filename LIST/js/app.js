@@ -79,7 +79,7 @@ const el = (id) => document.getElementById(id);
 // نقطة الدخول
 // ============================================================
 async function init() {
-  showSplash();
+  // showSplash();
   applySavedTheme();
   bindAuthForms();
   bindStaticEvents();
