@@ -5,8 +5,8 @@ import { DAY_NAMES_AR, formatArabicDate, ARABIC_MONTHS } from './utils.js';
 // ============================================================
 
 /** شبكة تقويم شهرية تفاعلية */
-export function renderCalendarGrid(cells, dayCompletionFn, restDays, todayISO) {
-  const headerRow = DAY_NAMES_AR.map((d) => `<div class="cal-weekday">${d}</div>`).join('');
+export function renderCalendarGrid(cells, dayCompletionFn, restDays, todayISO, dayNames = DAY_NAMES_AR) {
+  const headerRow = dayNames.map((d) => `<div class="cal-weekday">${d}</div>`).join('');
   const dayCells = cells
     .map((date) => {
       if (!date) return `<div class="cal-cell cal-cell--empty"></div>`;
@@ -110,7 +110,7 @@ export function renderCompass(percentage, pointsEarned, pointsTotal) {
 /**
  * مسار "حجارة الأيام" أسفل البوصلة — كل يوم عبارة عن نقطة على المسار
  */
-export function renderDayStones(weekDates, completionMap, restDaysSet, selectedDate) {
+export function renderDayStones(weekDates, completionMap, restDaysSet, selectedDate, dayNames = DAY_NAMES_AR) {
   return `
     <div class="day-path">
       ${weekDates
@@ -129,7 +129,7 @@ export function renderDayStones(weekDates, completionMap, restDaysSet, selectedD
           return `
             <button class="${stoneClass}" data-date="${date}" title="${formatArabicDate(date)}">
               <span class="day-stone__dot"></span>
-              <span class="day-stone__label">${DAY_NAMES_AR[index]}</span>
+              <span class="day-stone__label">${dayNames[index]}</span>
             </button>
           `;
         })
@@ -288,6 +288,35 @@ export function renderStreakAndCoins(currentStreak, bestStreak, coins) {
       <span>${coins} عملة</span>
     </div>
   `;
+}
+
+/** محتوى القائمة المنسدلة السريعة لتبديل الحساب (الحساب الحالي + الباقي) */
+export function renderAccountDropdownList(currentUser, otherAccounts) {
+  const currentLabel = currentUser.user_metadata?.full_name || currentUser.email;
+  const currentInitial = (currentLabel || '؟').trim().charAt(0).toUpperCase();
+
+  const currentItem = `
+    <div class="account-dropdown-item account-dropdown-item--current">
+      <div class="account-dropdown-item__avatar">${currentInitial}</div>
+      <span class="account-dropdown-item__email">${currentUser.email}</span>
+      <span class="account-dropdown-item__check">✓</span>
+    </div>
+  `;
+
+  const otherItems = otherAccounts
+    .map((a) => {
+      const label = a.fullName || a.email;
+      const initial = (label || '؟').trim().charAt(0).toUpperCase();
+      return `
+        <button class="account-dropdown-item js-dropdown-switch" data-user-id="${a.userId}">
+          <div class="account-dropdown-item__avatar">${initial}</div>
+          <span class="account-dropdown-item__email">${a.email}</span>
+        </button>
+      `;
+    })
+    .join('');
+
+  return currentItem + otherItems;
 }
 
 /** صف حساب محفوظ داخل قائمة "بدّل لحساب" بصفحة حسابي */

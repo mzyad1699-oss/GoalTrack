@@ -90,7 +90,7 @@ export function buildWeekReport(weekStart, goals, tasksByDate, restDays) {
 }
 
 /** تقرير شهري كامل: متوسط، أفضل/أسوأ أسبوع، مقارنة بالشهر السابق */
-export function buildMonthReport(year, monthIndex, goals, tasksByDate, restDays) {
+export function buildMonthReport(year, monthIndex, goals, tasksByDate, restDays, weekStartDay = 6) {
   const monthStart = toISODate(new Date(year, monthIndex, 1));
   const monthEnd = toISODate(new Date(year, monthIndex + 1, 0));
   const current = getRangeStats(monthStart, monthEnd, goals, tasksByDate, restDays);
@@ -103,7 +103,7 @@ export function buildMonthReport(year, monthIndex, goals, tasksByDate, restDays)
   while (cursor <= lastCursor) {
     const dateStr = toISODate(cursor);
     const jsDay = cursor.getDay();
-    const weekStart = addDays(dateStr, -((jsDay + 1) % 7));
+    const weekStart = addDays(dateStr, -((jsDay - weekStartDay + 7) % 7));
     if (!seenWeekStarts.has(weekStart)) {
       seenWeekStarts.add(weekStart);
       weekStats.push({ weekStart, ...getRangeStats(weekStart, addDays(weekStart, 6), goals, tasksByDate, restDays) });

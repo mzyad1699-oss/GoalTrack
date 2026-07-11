@@ -127,6 +127,7 @@ export function openProfile() {
 /** الرجوع من صفحة "حسابي" لنفس الـ Tabs اللي كانت مفتوحة قبلها */
 export function closeProfile(restore = true) {
   document.getElementById('page-profile')?.classList.add('hidden');
+  document.getElementById('account-dropdown')?.classList.remove('account-dropdown--open');
   document.getElementById('tab-bar')?.classList.remove('hidden');
   if (restore && nav.preProfileState) {
     nav.openTabs = nav.preProfileState.openTabs;

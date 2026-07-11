@@ -2,7 +2,6 @@ import supabaseClient from './supabaseClient.js';
 import { Auth } from './auth.js';
 import { DB } from './database.js';
 import {
-  DAY_NAMES_AR,
   generateId,
   toISODate,
   getWeekDates,
@@ -13,6 +12,8 @@ import {
   ARABIC_MONTHS,
   getMonthGrid,
   buildHeatmapWeeks,
+  getRotatedDayNames,
+  WEEK_START_OPTIONS,
 } from './utils.js';
 import {
   renderCompass,
@@ -31,6 +32,7 @@ import {
   renderGoalYearProgress,
   renderTemplateCard,
   renderAccountRow,
+  renderAccountDropdownList,
 } from './components.js';
 import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
 import { computeGlobalStats, closeFinishedWeeks, countFullWeeks, countFullMonths } from './gamification.js';
@@ -39,6 +41,8 @@ import { buildWeekReport, buildMonthReport, buildQuarterReport, buildYearReport 
 import { buildExportPayload, downloadJSON, readImportFile, saveAutoBackup, getAutoBackupInfo } from './backup.js';
 import { initNavigation, openTab, closeTab, openProfile, closeProfile } from './navigation.js';
 import { rememberCurrentSession, getOtherAccounts, forgetAccount, switchToAccount } from './accounts.js';
+import { hideSplash } from './splash.js';
+import { runOnboardingWizard } from './onboarding.js';
 
 // ============================================================
 // حالة التطبيق (State)
@@ -49,11 +53,12 @@ const state = {
   goals: [],
   tasksByDate: {}, // { '2026-07-05': { goalId: taskRow } }
   restDays: new Set(),
+  weekStartDay: 6, // 6=سبت (افتراضي)، بيتحدث من إعدادات المستخدم بعد التحميل
   weekDates: getWeekDates(),
   selectedDate: toISODate(new Date()),
   weekNotes: null,
   allWeekNotes: [], // كل ملاحظات الأسابيع (مطلوبة للبحث)
-  userStats: { xp: 0, coins: 0, best_streak: 0, week_history: [] },
+  userStats: { xp: 0, coins: 0, best_streak: 0, week_history: [], start_date: null, week_start_day: 6, onboarding_completed: false },
   unlockedAchievementIds: new Set(),
   computedStats: null, // آخر نتيجة من computeGlobalStats + مشتقات إضافية
   calendarYear: today.getFullYear(),
@@ -74,6 +79,7 @@ const el = (id) => document.getElementById(id);
 // نقطة الدخول
 // ============================================================
 async function init() {
+  showSplash();
   applySavedTheme();
   bindAuthForms();
   bindStaticEvents();
@@ -89,6 +95,7 @@ async function init() {
     } else {
       el('app-shell').classList.add('hidden');
       el('auth-screen').classList.remove('hidden');
+      hideSplash();
     }
   });
 
@@ -293,16 +300,8 @@ function bindStaticEvents() {
     const forgetBtn = e.target.closest('.js-forget-account');
 
     if (switchBtn) {
-      const userId = switchBtn.dataset.userId;
       switchBtn.textContent = '...جاري التبديل';
-      try {
-        await switchToAccount(supabaseClient, userId);
-        showToast('تم التبديل للحساب بنجاح', 'success');
-        renderProfilePage();
-      } catch (err) {
-        showToast(err.message || 'تعذر التبديل لهذا الحساب', 'error');
-        renderKnownAccounts();
-      }
+      await performAccountSwitch(switchBtn.dataset.userId);
     }
 
     if (forgetBtn) {
@@ -310,6 +309,49 @@ function bindStaticEvents() {
       if (!confirm('هل تريد إزالة هذا الحساب من القائمة المحفوظة على هذا الجهاز؟')) return;
       forgetAccount(userId);
       renderKnownAccounts();
+      renderAccountDropdown();
+    }
+  });
+
+  // ============================================================
+  // القائمة المنسدلة السريعة (▼ بجانب صورة الحساب)
+  // ============================================================
+  el('btn-account-switcher-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    el('account-dropdown').classList.toggle('account-dropdown--open');
+  });
+
+  document.addEventListener('click', (e) => {
+    const dropdown = el('account-dropdown');
+    if (!dropdown.classList.contains('account-dropdown--open')) return;
+    if (!dropdown.contains(e.target) && e.target !== el('btn-account-switcher-toggle')) {
+      dropdown.classList.remove('account-dropdown--open');
+    }
+  });
+
+  el('account-dropdown-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.js-dropdown-switch');
+    if (!btn) return;
+    await performAccountSwitch(btn.dataset.userId);
+  });
+
+  el('btn-dropdown-add-account').addEventListener('click', async () => {
+    el('account-dropdown').classList.remove('account-dropdown--open');
+    await Auth.signOut();
+    switchAuthTab('login');
+    showToast('حسابك اتحفظ، تقدر تبدّل له تاني من صفحة حسابي بعد ما تسجّل دخول', 'success');
+  });
+
+  el('btn-dropdown-logout').addEventListener('click', async () => {
+    await Auth.signOut();
+  });
+
+  // ============================================================
+  // إعداد يوم بداية الأسبوع
+  // ============================================================
+  el('settings-week-start-options').addEventListener('change', (e) => {
+    if (e.target.name === 'settings-week-start') {
+      handleWeekStartChange(Number(e.target.value));
     }
   });
 
@@ -387,24 +429,70 @@ async function loadEverything() {
     state.tasksByDate[t.task_date][t.goal_id] = t;
   });
 
-  const currentWeekStart = state.weekDates[0];
-  state.allWeekNotes = weekNotes;
-  state.weekNotes = weekNotes.find((w) => w.week_start === currentWeekStart) || null;
-
   state.userStats = userStatsRows[0] || {
     user_id: state.user.id,
     xp: 0,
     coins: 0,
     best_streak: 0,
     week_history: [],
+    start_date: null,
+    week_start_day: 6,
+    onboarding_completed: false,
   };
+
+  // يوم بداية الأسبوع من إعدادات المستخدم — بيتحكم في كل حسابات الأسبوع/التقويم/الـ Heatmap
+  state.weekStartDay = state.userStats.week_start_day ?? 6;
+  state.weekDates = getWeekDates(new Date(), state.weekStartDay);
+  state.reportWeek = state.weekDates[0];
+
+  const currentWeekStart = state.weekDates[0];
+  state.allWeekNotes = weekNotes;
+  state.weekNotes = weekNotes.find((w) => w.week_start === currentWeekStart) || null;
   state.unlockedAchievementIds = new Set(userAchievements.map((a) => a.achievement_id));
+
+  // أول دخول: لسه محددش تاريخ بداية رحلته → اعرض معالج الإعداد قبل أي حاجة تانية
+  if (!state.userStats.start_date) {
+    hideSplash();
+    runOnboardingWizard({ onComplete: handleOnboardingComplete });
+    return;
+  }
 
   await closePastWeeksAndAwardCoins();
   renderAll();
   await checkAndUnlockAchievements();
   saveAutoBackup(state.user.id, state);
   renderBackupInfo();
+  hideSplash();
+}
+
+/** بيتنفّذ لما المستخدم يخلّص معالج الإعداد الأول */
+async function handleOnboardingComplete({ startDate, weekStartDay, goals }) {
+  state.userStats = {
+    ...state.userStats,
+    user_id: state.user.id,
+    start_date: startDate,
+    week_start_day: weekStartDay,
+    onboarding_completed: true,
+  };
+  await DB.upsertRow('user_stats', state.userStats);
+
+  for (let i = 0; i < goals.length; i++) {
+    const g = goals[i];
+    const goalRow = {
+      id: generateId(),
+      user_id: state.user.id,
+      name: g.name,
+      points: g.points,
+      color: ['#2DD4BF', '#F5B942', '#FF6B5C', '#7C9CFF', '#B98CF0', '#4ADE80'][i % 6],
+      is_active: true,
+      sort_order: i,
+    };
+    state.goals.push(goalRow);
+    await DB.upsertRow('goals', goalRow);
+  }
+
+  showToast('رحلتك بدأت 🚀', 'success');
+  await loadEverything();
 }
 
 /** يقفل أي أسبوع خلص ولسه مش متسجل، ويحسب Coins ويحدّث best_streak */
@@ -412,7 +500,7 @@ async function closePastWeeksAndAwardCoins() {
   const todayISO = toISODate(new Date());
   const allKnownWeekStarts = new Set();
   Object.keys(state.tasksByDate).forEach((date) => {
-    allKnownWeekStarts.add(getWeekDates(new Date(date))[0]);
+    allKnownWeekStarts.add(getWeekDates(new Date(date), state.weekStartDay)[0]);
   });
 
   const { updatedHistory, coinsGained } = closeFinishedWeeks({
@@ -699,7 +787,8 @@ function renderHero() {
     state.weekDates,
     completionMap,
     state.restDays,
-    state.selectedDate
+    state.selectedDate,
+    getRotatedDayNames(state.weekStartDay)
   );
   document.querySelectorAll('.day-stone').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -770,8 +859,8 @@ function dayCompletionForDisplay(date) {
 }
 
 function renderCalendar() {
-  const cells = getMonthGrid(state.calendarYear, state.calendarMonth);
-  el('calendar-container').innerHTML = renderCalendarGrid(cells, dayCompletionForDisplay, state.restDays, toISODate(new Date()));
+  const cells = getMonthGrid(state.calendarYear, state.calendarMonth, state.weekStartDay);
+  el('calendar-container').innerHTML = renderCalendarGrid(cells, dayCompletionForDisplay, state.restDays, toISODate(new Date()), getRotatedDayNames(state.weekStartDay));
   el('calendar-label').textContent = `${ARABIC_MONTHS[state.calendarMonth]} ${state.calendarYear}`;
   document.querySelectorAll('.cal-cell[data-date]').forEach((btn) => {
     btn.addEventListener('click', () => openDayModal(btn.dataset.date));
@@ -838,7 +927,7 @@ function closeDayModal() {
 // Heatmap السنوي
 // ============================================================
 function renderHeatmapSection() {
-  const weeks = buildHeatmapWeeks(state.heatmapYear);
+  const weeks = buildHeatmapWeeks(state.heatmapYear, state.weekStartDay);
   el('heatmap-container').innerHTML = renderHeatmap(weeks, state.heatmapYear, dayCompletionForDisplay, state.restDays);
   el('heatmap-year-label').textContent = String(state.heatmapYear);
 }
@@ -958,14 +1047,14 @@ function renderReports() {
   if (state.reportTab === 'week') {
     report = buildWeekReport(state.reportWeek, goals, state.tasksByDate, state.restDays);
     label = `${formatArabicDate(state.reportWeek)} — ${formatArabicDate(addDaysLocal(state.reportWeek, 6))}`;
-    chartLabels = DAY_NAMES_AR;
+    chartLabels = getRotatedDayNames(state.weekStartDay);
     chartData = state.weekDates.map((_, i) => {
       const date = addDaysLocal(state.reportWeek, i);
       const p = report.dayPercentages[date];
       return p === null || p === undefined ? 0 : p;
     });
   } else if (state.reportTab === 'month') {
-    report = buildMonthReport(state.reportMonth.year, state.reportMonth.month, goals, state.tasksByDate, state.restDays);
+    report = buildMonthReport(state.reportMonth.year, state.reportMonth.month, goals, state.tasksByDate, state.restDays, state.weekStartDay);
     label = report.label;
     chartLabels = report.weeks.map((w, i) => `أسبوع ${i + 1}`);
     chartData = report.weeks.map((w) => w.percentage);
@@ -991,9 +1080,9 @@ function renderReports() {
 // ============================================================
 function renderComparison() {
   const goals = state.goals.filter((g) => g.is_active);
-  const thisWeek = buildWeekReport(getWeekDates(new Date())[0], goals, state.tasksByDate, state.restDays);
-  const lastWeek = buildWeekReport(addDaysLocal(getWeekDates(new Date())[0], -7), goals, state.tasksByDate, state.restDays);
-  const thisMonth = buildMonthReport(new Date().getFullYear(), new Date().getMonth(), goals, state.tasksByDate, state.restDays);
+  const thisWeek = buildWeekReport(getWeekDates(new Date(), state.weekStartDay)[0], goals, state.tasksByDate, state.restDays);
+  const lastWeek = buildWeekReport(addDaysLocal(getWeekDates(new Date(), state.weekStartDay)[0], -7), goals, state.tasksByDate, state.restDays);
+  const thisMonth = buildMonthReport(new Date().getFullYear(), new Date().getMonth(), goals, state.tasksByDate, state.restDays, state.weekStartDay);
   const thisYear = buildYearReport(new Date().getFullYear(), goals, state.tasksByDate, state.restDays);
 
   const rows = [
@@ -1160,6 +1249,20 @@ async function handleImportFromPayload(payload) {
   await loadEverything();
 }
 
+/** تبديل فعلي لحساب محفوظ (مُستخدمة من القائمة المنسدلة وقائمة إدارة الحسابات) */
+async function performAccountSwitch(userId) {
+  try {
+    await switchToAccount(supabaseClient, userId);
+    el('account-dropdown').classList.remove('account-dropdown--open');
+    showToast('تم التبديل للحساب بنجاح', 'success');
+    renderProfilePage();
+  } catch (err) {
+    showToast(err.message || 'تعذر التبديل لهذا الحساب', 'error');
+    renderKnownAccounts();
+    renderAccountDropdown();
+  }
+}
+
 // ============================================================
 // صفحة حسابي (Profile)
 // ============================================================
@@ -1185,6 +1288,8 @@ function renderProfilePage() {
   el('btn-change-email').classList.toggle('hidden', isGoogle);
 
   renderKnownAccounts();
+  renderAccountDropdown();
+  renderWeekStartSetting();
 }
 
 /** رسم قائمة الحسابات المحفوظة على الجهاز (غير الحساب الحالي) للتبديل السريع */
@@ -1193,6 +1298,33 @@ function renderKnownAccounts() {
   el('known-accounts-list').innerHTML = others.length
     ? others.map(renderAccountRow).join('')
     : emptyState('مفيش حسابات تانية محفوظة على الجهاز ده. سجّل دخول بحساب تاني وهيتحفظ هنا تلقائيًا.');
+}
+
+/** رسم محتوى القائمة المنسدلة السريعة (▼ بجانب صورة الحساب) */
+function renderAccountDropdown() {
+  const others = getOtherAccounts(state.user.id);
+  el('account-dropdown-list').innerHTML = renderAccountDropdownList(state.user, others);
+}
+
+/** رسم خيارات يوم بداية الأسبوع داخل إعدادات الحساب */
+function renderWeekStartSetting() {
+  el('settings-week-start-options').innerHTML = WEEK_START_OPTIONS.map(
+    (opt) => `
+      <label class="onboarding-radio">
+        <input type="radio" name="settings-week-start" value="${opt.value}" ${Number(state.weekStartDay) === opt.value ? 'checked' : ''} />
+        <span>${opt.label}</span>
+      </label>`
+  ).join('');
+}
+
+async function handleWeekStartChange(newValue) {
+  state.weekStartDay = newValue;
+  state.userStats.week_start_day = newValue;
+  await DB.upsertRow('user_stats', state.userStats);
+  state.weekDates = getWeekDates(new Date(), state.weekStartDay);
+  state.reportWeek = state.weekDates[0];
+  renderAll();
+  showToast('اتغيّر يوم بداية الأسبوع', 'success');
 }
 
 // ============================================================
