@@ -290,6 +290,23 @@ export function renderStreakAndCoins(currentStreak, bestStreak, coins) {
   `;
 }
 
+/** صف حساب محفوظ داخل قائمة "بدّل لحساب" بصفحة حسابي */
+export function renderAccountRow(account) {
+  const label = account.fullName || account.email;
+  const initial = (label || '؟').trim().charAt(0).toUpperCase();
+  return `
+    <div class="account-row">
+      <div class="account-row__avatar">${initial}</div>
+      <div class="account-row__info">
+        <span class="account-row__name">${label}</span>
+        <span class="account-row__email">${account.email}</span>
+      </div>
+      <button class="btn btn--primary js-switch-account" data-user-id="${account.userId}" style="width:auto;padding:7px 14px;font-size:12px;">تبديل</button>
+      <button class="account-row__forget js-forget-account" data-user-id="${account.userId}" title="إزالة من القائمة">✕</button>
+    </div>
+  `;
+}
+
 /** بطاقة إنجاز مفردة داخل شبكة الإنجازات */
 export function renderAchievementCard(achievement, isUnlocked) {
   return `

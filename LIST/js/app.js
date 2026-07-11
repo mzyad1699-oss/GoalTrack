@@ -30,13 +30,15 @@ import {
   renderReportCard,
   renderGoalYearProgress,
   renderTemplateCard,
+  renderAccountRow,
 } from './components.js';
-// import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
+import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
 import { computeGlobalStats, closeFinishedWeeks, countFullWeeks, countFullMonths } from './gamification.js';
 import { ACHIEVEMENTS, checkNewlyUnlocked } from './achievements.js';
 import { buildWeekReport, buildMonthReport, buildQuarterReport, buildYearReport } from './reports.js';
 import { buildExportPayload, downloadJSON, readImportFile, saveAutoBackup, getAutoBackupInfo } from './backup.js';
 import { initNavigation, openTab, closeTab, openProfile, closeProfile } from './navigation.js';
+import { rememberCurrentSession, getOtherAccounts, forgetAccount, switchToAccount } from './accounts.js';
 
 // ============================================================
 // حالة التطبيق (State)
@@ -82,6 +84,7 @@ async function init() {
       el('auth-screen').classList.add('hidden');
       el('app-shell').classList.remove('hidden');
       initNavigation(user.id);
+      await rememberCurrentSession(supabaseClient, user);
       await loadEverything();
     } else {
       el('app-shell').classList.add('hidden');
@@ -95,6 +98,7 @@ async function init() {
     el('auth-screen').classList.add('hidden');
     el('app-shell').classList.remove('hidden');
     initNavigation(existingUser.id);
+    await rememberCurrentSession(supabaseClient, existingUser);
     await loadEverything();
   }
 }
@@ -278,14 +282,35 @@ function bindStaticEvents() {
     await Auth.signOut();
   });
 
-  el('btn-switch-account').addEventListener('click', async () => {
+  el('btn-add-account').addEventListener('click', async () => {
     await Auth.signOut();
-    showToast('سجّل دخول بحسابك التاني دلوقتي', 'success');
+    switchAuthTab('login');
+    showToast('حسابك اتحفظ، تقدر تبدّل له تاني من صفحة حسابي بعد ما تسجّل دخول', 'success');
   });
 
-  el('btn-new-account').addEventListener('click', async () => {
-    await Auth.signOut();
-    switchAuthTab('signup');
+  el('known-accounts-list').addEventListener('click', async (e) => {
+    const switchBtn = e.target.closest('.js-switch-account');
+    const forgetBtn = e.target.closest('.js-forget-account');
+
+    if (switchBtn) {
+      const userId = switchBtn.dataset.userId;
+      switchBtn.textContent = '...جاري التبديل';
+      try {
+        await switchToAccount(supabaseClient, userId);
+        showToast('تم التبديل للحساب بنجاح', 'success');
+        renderProfilePage();
+      } catch (err) {
+        showToast(err.message || 'تعذر التبديل لهذا الحساب', 'error');
+        renderKnownAccounts();
+      }
+    }
+
+    if (forgetBtn) {
+      const userId = forgetBtn.dataset.userId;
+      if (!confirm('هل تريد إزالة هذا الحساب من القائمة المحفوظة على هذا الجهاز؟')) return;
+      forgetAccount(userId);
+      renderKnownAccounts();
+    }
   });
 
   el('btn-change-name').addEventListener('click', async () => {
@@ -1158,6 +1183,16 @@ function renderProfilePage() {
   el('profile-google-notice').classList.toggle('hidden', !isGoogle);
   el('btn-change-password').classList.toggle('hidden', isGoogle);
   el('btn-change-email').classList.toggle('hidden', isGoogle);
+
+  renderKnownAccounts();
+}
+
+/** رسم قائمة الحسابات المحفوظة على الجهاز (غير الحساب الحالي) للتبديل السريع */
+function renderKnownAccounts() {
+  const others = getOtherAccounts(state.user.id);
+  el('known-accounts-list').innerHTML = others.length
+    ? others.map(renderAccountRow).join('')
+    : emptyState('مفيش حسابات تانية محفوظة على الجهاز ده. سجّل دخول بحساب تاني وهيتحفظ هنا تلقائيًا.');
 }
 
 // ============================================================

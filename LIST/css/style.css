@@ -933,6 +933,37 @@ button, input, select, textarea {
 
 .profile-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
+.accounts-hint { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+.accounts-list { display: flex; flex-direction: column; gap: 8px; }
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.account-row__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-violet), var(--accent-teal));
+  color: #06231f;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.account-row__info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.account-row__name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.account-row__email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.account-row__forget { background: transparent; border: none; color: var(--accent-coral); cursor: pointer; font-size: 13px; padding: 4px; }
+
 /* ============ استجابة للموبايل ============ */
 @media (max-width: 860px) {
   .app-shell { grid-template-columns: 1fr; }
