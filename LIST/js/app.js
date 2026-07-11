@@ -34,7 +34,7 @@ import {
   renderAccountRow,
   renderAccountDropdownList,
 } from './components.js';
-import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
+// import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
 import { computeGlobalStats, closeFinishedWeeks, countFullWeeks, countFullMonths } from './gamification.js';
 import { ACHIEVEMENTS, checkNewlyUnlocked } from './achievements.js';
 import { buildWeekReport, buildMonthReport, buildQuarterReport, buildYearReport } from './reports.js';
