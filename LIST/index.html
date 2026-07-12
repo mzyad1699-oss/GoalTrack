@@ -19,6 +19,15 @@
   <div id="splash-message" class="splash-message">جاري التحميل...</div>
 </div>
 
+<!-- ============ شاشة خطأ التهيئة (Fallback عند الفشل أو الـ Timeout) ============ -->
+<div id="init-error-screen" class="init-error-screen hidden">
+  <div class="init-error-card">
+    <div class="init-error-icon">⚠️</div>
+    <p id="init-error-message">تعذر تحميل التطبيق، حاول إعادة المحاولة</p>
+    <button id="btn-init-retry" class="btn btn--primary" style="width:auto; padding:10px 24px;">إعادة المحاولة</button>
+  </div>
+</div>
+
 <!-- ============ شاشة تسجيل الدخول / إنشاء حساب ============ -->
 <div id="auth-screen" class="auth-screen">
   <div class="auth-card">

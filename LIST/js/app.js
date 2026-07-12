@@ -34,14 +34,14 @@ import {
   renderAccountRow,
   renderAccountDropdownList,
 } from './components.js';
-// import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
+import { renderWeeklyPointsChart, renderTrendChart } from './charts.js';
 import { computeGlobalStats, closeFinishedWeeks, countFullWeeks, countFullMonths } from './gamification.js';
 import { ACHIEVEMENTS, checkNewlyUnlocked } from './achievements.js';
 import { buildWeekReport, buildMonthReport, buildQuarterReport, buildYearReport } from './reports.js';
 import { buildExportPayload, downloadJSON, readImportFile, saveAutoBackup, getAutoBackupInfo } from './backup.js';
 import { initNavigation, openTab, closeTab, openProfile, closeProfile } from './navigation.js';
 import { rememberCurrentSession, getOtherAccounts, forgetAccount, switchToAccount } from './accounts.js';
-import { hideSplash } from './splash.js';
+import { hideSplash, showSplash, showLoadError } from './splash.js';
 import { runOnboardingWizard } from './onboarding.js';
 
 // ============================================================
@@ -78,27 +78,49 @@ const el = (id) => document.getElementById(id);
 // ============================================================
 // نقطة الدخول
 // ============================================================
+const INIT_TIMEOUT_MS = 7000; // لو التهيئة أخدت أكتر من كده، نعتبرها فشلت ونعرض زرار إعادة المحاولة
+
 async function init() {
-  // showSplash();
+  showSplash();
   applySavedTheme();
   bindAuthForms();
   bindStaticEvents();
 
+  // أي تغيير في حالة تسجيل الدخول بعد التحميل الأولي (دخول/خروج/تبديل حساب) — بنغلفه بـ try/catch/finally
+  // عشان لو حصل أي Exception أثناء تحميل بيانات المستخدم، الشاشة متفضلش عالقة على Loading
   Auth.onAuthStateChange(async (user) => {
     state.user = user;
-    if (user) {
-      el('auth-screen').classList.add('hidden');
-      el('app-shell').classList.remove('hidden');
-      initNavigation(user.id);
-      await rememberCurrentSession(supabaseClient, user);
-      await loadEverything();
-    } else {
-      el('app-shell').classList.add('hidden');
-      el('auth-screen').classList.remove('hidden');
+    try {
+      if (user) {
+        el('auth-screen').classList.add('hidden');
+        el('app-shell').classList.remove('hidden');
+        initNavigation(user.id);
+        await rememberCurrentSession(supabaseClient, user);
+        await loadEverything();
+      } else {
+        el('app-shell').classList.add('hidden');
+        el('auth-screen').classList.remove('hidden');
+      }
+    } catch (err) {
+      console.error('فشل تحديث حالة الجلسة', err);
+      showToast('حصلت مشكلة أثناء تحميل بياناتك، جرّب تعمل Refresh للصفحة', 'error');
+    } finally {
       hideSplash();
     }
   });
 
+  // التهيئة الأولى (أول ما الصفحة تفتح): بنسباق بينها وبين Timeout احتياطي
+  try {
+    await Promise.race([runInitialAuthCheck(), rejectAfter(INIT_TIMEOUT_MS)]);
+  } catch (err) {
+    console.error('فشلت تهيئة التطبيق أو استغرقت وقتًا أطول من اللازم', err);
+    hideSplash();
+    showLoadError('تعذر تحميل التطبيق، حاول إعادة المحاولة');
+  }
+}
+
+/** فحص حالة تسجيل الدخول الأولى وتحميل البيانات (منفصلة عشان تتسابق مع Timeout بسهولة) */
+async function runInitialAuthCheck() {
   const existingUser = await Auth.getCurrentUser();
   state.user = existingUser;
   if (existingUser) {
@@ -107,7 +129,15 @@ async function init() {
     initNavigation(existingUser.id);
     await rememberCurrentSession(supabaseClient, existingUser);
     await loadEverything();
+  } else {
+    el('auth-screen').classList.remove('hidden');
+    hideSplash();
   }
+}
+
+/** Promise بترفض بعد مدة معينة — أساس الـ Timeout الاحتياطي */
+function rejectAfter(ms) {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error('init-timeout')), ms));
 }
 
 // ============================================================
@@ -409,60 +439,66 @@ function randomAccentColor() {
 // تحميل البيانات
 // ============================================================
 async function loadEverything() {
-  const [goals, tasks, restDays, weekNotes, userStatsRows, userAchievements, templates] = await Promise.all([
-    DB.fetchTable('goals', (g) => g.user_id === state.user.id),
-    DB.fetchTable('tasks', (t) => t.user_id === state.user.id),
-    DB.fetchTable('rest_days', (r) => r.user_id === state.user.id),
-    DB.fetchTable('week_notes', (w) => w.user_id === state.user.id),
-    DB.fetchTable('user_stats', (s) => s.user_id === state.user.id),
-    DB.fetchTable('user_achievements', (a) => a.user_id === state.user.id),
-    DB.fetchTable('templates'),
-  ]);
+  try {
+    const [goals, tasks, restDays, weekNotes, userStatsRows, userAchievements, templates] = await Promise.all([
+      DB.fetchTable('goals', (g) => g.user_id === state.user.id),
+      DB.fetchTable('tasks', (t) => t.user_id === state.user.id),
+      DB.fetchTable('rest_days', (r) => r.user_id === state.user.id),
+      DB.fetchTable('week_notes', (w) => w.user_id === state.user.id),
+      DB.fetchTable('user_stats', (s) => s.user_id === state.user.id),
+      DB.fetchTable('user_achievements', (a) => a.user_id === state.user.id),
+      DB.fetchTable('templates'),
+    ]);
 
-  state.goals = goals.sort((a, b) => a.sort_order - b.sort_order);
-  state.restDays = new Set(restDays.map((r) => r.rest_date));
-  state.templates = templates.sort((a, b) => (b.uses_count || 0) - (a.uses_count || 0));
+    state.goals = goals.sort((a, b) => a.sort_order - b.sort_order);
+    state.restDays = new Set(restDays.map((r) => r.rest_date));
+    state.templates = templates.sort((a, b) => (b.uses_count || 0) - (a.uses_count || 0));
 
-  state.tasksByDate = {};
-  tasks.forEach((t) => {
-    if (!state.tasksByDate[t.task_date]) state.tasksByDate[t.task_date] = {};
-    state.tasksByDate[t.task_date][t.goal_id] = t;
-  });
+    state.tasksByDate = {};
+    tasks.forEach((t) => {
+      if (!state.tasksByDate[t.task_date]) state.tasksByDate[t.task_date] = {};
+      state.tasksByDate[t.task_date][t.goal_id] = t;
+    });
 
-  state.userStats = userStatsRows[0] || {
-    user_id: state.user.id,
-    xp: 0,
-    coins: 0,
-    best_streak: 0,
-    week_history: [],
-    start_date: null,
-    week_start_day: 6,
-    onboarding_completed: false,
-  };
+    state.userStats = userStatsRows[0] || {
+      user_id: state.user.id,
+      xp: 0,
+      coins: 0,
+      best_streak: 0,
+      week_history: [],
+      start_date: null,
+      week_start_day: 6,
+      onboarding_completed: false,
+    };
 
-  // يوم بداية الأسبوع من إعدادات المستخدم — بيتحكم في كل حسابات الأسبوع/التقويم/الـ Heatmap
-  state.weekStartDay = state.userStats.week_start_day ?? 6;
-  state.weekDates = getWeekDates(new Date(), state.weekStartDay);
-  state.reportWeek = state.weekDates[0];
+    // يوم بداية الأسبوع من إعدادات المستخدم — بيتحكم في كل حسابات الأسبوع/التقويم/الـ Heatmap
+    state.weekStartDay = state.userStats.week_start_day ?? 6;
+    state.weekDates = getWeekDates(new Date(), state.weekStartDay);
+    state.reportWeek = state.weekDates[0];
 
-  const currentWeekStart = state.weekDates[0];
-  state.allWeekNotes = weekNotes;
-  state.weekNotes = weekNotes.find((w) => w.week_start === currentWeekStart) || null;
-  state.unlockedAchievementIds = new Set(userAchievements.map((a) => a.achievement_id));
+    const currentWeekStart = state.weekDates[0];
+    state.allWeekNotes = weekNotes;
+    state.weekNotes = weekNotes.find((w) => w.week_start === currentWeekStart) || null;
+    state.unlockedAchievementIds = new Set(userAchievements.map((a) => a.achievement_id));
 
-  // أول دخول: لسه محددش تاريخ بداية رحلته → اعرض معالج الإعداد قبل أي حاجة تانية
-  if (!state.userStats.start_date) {
+    // أول دخول: لسه محددش تاريخ بداية رحلته → اعرض معالج الإعداد قبل أي حاجة تانية
+    if (!state.userStats.start_date) {
+      runOnboardingWizard({ onComplete: handleOnboardingComplete });
+      return;
+    }
+
+    await closePastWeeksAndAwardCoins();
+    renderAll();
+    await checkAndUnlockAchievements();
+    saveAutoBackup(state.user.id, state);
+    renderBackupInfo();
+  } catch (err) {
+    console.error('فشل تحميل بيانات التطبيق', err);
+    showToast('تعذر تحميل بياناتك، تحقق من اتصالك بالإنترنت وحاول تاني', 'error');
+  } finally {
+    // مهما حصل (نجاح، فشل، أو حتى فتح معالج الإعداد) — شاشة التحميل لازم تختفي هنا
     hideSplash();
-    runOnboardingWizard({ onComplete: handleOnboardingComplete });
-    return;
   }
-
-  await closePastWeeksAndAwardCoins();
-  renderAll();
-  await checkAndUnlockAchievements();
-  saveAutoBackup(state.user.id, state);
-  renderBackupInfo();
-  hideSplash();
 }
 
 /** بيتنفّذ لما المستخدم يخلّص معالج الإعداد الأول */

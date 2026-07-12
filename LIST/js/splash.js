@@ -23,11 +23,26 @@ export function updateSplashMessage(text) {
 /** إخفاء الشاشة بـ Fade Out، مع احترام أقل مدة عرض */
 export function hideSplash() {
   const el = document.getElementById('splash-screen');
-  if (!el) return;
+  if (!el || el.classList.contains('splash--hidden')) return;
   const elapsed = shownAt ? Date.now() - shownAt : MIN_DISPLAY_MS;
   const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
   setTimeout(() => {
     el.classList.add('splash--hidden');
     setTimeout(() => el.remove(), 500); // يتشال من الـ DOM بعد ما الـ Fade يخلص
   }, remaining);
+}
+
+/**
+ * إظهار شاشة خطأ تحميل مستقلة عن الـ Splash (بتُستخدم لما التهيئة تفشل أو تتأخر أكتر من اللازم)
+ * فيها زرار "إعادة المحاولة" بيعمل Reload كامل للصفحة كأبسط وأضمن طريقة استرجاع
+ */
+export function showLoadError(message = 'تعذر تحميل التطبيق، حاول إعادة المحاولة') {
+  const el = document.getElementById('init-error-screen');
+  if (!el) return;
+  el.querySelector('#init-error-message').textContent = message;
+  el.classList.remove('hidden');
+  requestAnimationFrame(() => el.classList.add('init-error-screen--visible'));
+
+  const retryBtn = el.querySelector('#btn-init-retry');
+  retryBtn.onclick = () => window.location.reload();
 }

@@ -964,6 +964,33 @@ button, input, select, textarea {
 .account-row__email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .account-row__forget { background: transparent; border: none; color: var(--accent-coral); cursor: pointer; font-size: 13px; padding: 4px; }
 
+/* ============ شاشة خطأ التهيئة (Fallback) ============ */
+.init-error-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+  opacity: 0;
+  transition: opacity 300ms ease;
+  padding: 20px;
+}
+.init-error-screen--visible { opacity: 1; }
+
+.init-error-card {
+  text-align: center;
+  max-width: 340px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  box-shadow: var(--shadow-soft);
+}
+.init-error-icon { font-size: 36px; margin-bottom: 12px; }
+.init-error-card p { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; }
+
 /* ============ شاشة التحميل (Splash) ============ */
 .splash-screen {
   position: fixed;
