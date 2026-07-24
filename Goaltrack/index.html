@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GoalTrack — رحلتك الأسبوعية</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ============ شاشة التحميل ============ -->
+<div id="splash-screen" class="splash-screen">
+  <div class="splash-logo">GoalTrack</div>
+  <div class="splash-spinner"></div>
+  <div id="splash-message" class="splash-message">جاري التحميل...</div>
+</div>
+
+<!-- ============ شاشة خطأ التهيئة (Fallback عند الفشل أو الـ Timeout) ============ -->
+<div id="init-error-screen" class="init-error-screen hidden">
+  <div class="init-error-card">
+    <div class="init-error-icon">⚠️</div>
+    <p id="init-error-message">تعذر تحميل التطبيق، حاول إعادة المحاولة</p>
+    <button id="btn-init-retry" class="btn btn--primary" style="width:auto; padding:10px 24px;">إعادة المحاولة</button>
+  </div>
+</div>
+
+<!-- ============ شاشة تسجيل الدخول / إنشاء حساب ============ -->
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">GoalTrack</div>
+    <p class="auth-tagline">رحلتك الأسبوعية نحو أهدافك، خطوة بخطوة</p>
+
+    <div class="auth-tabs">
+      <button id="tab-login" class="is-active">تسجيل الدخول</button>
+      <button id="tab-signup">حساب جديد</button>
+    </div>
+
+    <form id="form-login">
+      <div class="field">
+        <label for="login-email">البريد الإلكتروني</label>
+        <input type="email" id="login-email" required placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="login-password">كلمة المرور</label>
+        <input type="password" id="login-password" required minlength="6" />
+      </div>
+      <button type="submit" class="btn btn--primary">دخول</button>
+      <a href="#" id="link-forgot" class="auth-forgot">نسيت كلمة المرور؟</a>
+    </form>
+
+    <form id="form-signup" class="hidden">
+      <div class="field">
+        <label for="signup-name">الاسم</label>
+        <input type="text" id="signup-name" required />
+      </div>
+      <div class="field">
+        <label for="signup-email">البريد الإلكتروني</label>
+        <input type="email" id="signup-email" required />
+      </div>
+      <div class="field">
+        <label for="signup-password">كلمة المرور</label>
+        <input type="password" id="signup-password" required minlength="6" />
+      </div>
+      <button type="submit" class="btn btn--primary">إنشاء الحساب</button>
+    </form>
+
+    <button id="btn-google" class="btn btn--google">
+      <span>🔎</span> المتابعة باستخدام جوجل
+    </button>
+  </div>
+</div>
+
+<!-- ============ هيكل التطبيق بعد تسجيل الدخول ============ -->
+<!-- ============ معالج الإعداد الأول (Onboarding) ============ -->
+<div id="onboarding-screen" class="onboarding-screen onboarding-screen--hidden hidden">
+  <div class="onboarding-card">
+    <div class="onboarding-progress" id="onboarding-progress"></div>
+
+    <!-- الخطوة 1: تاريخ البداية -->
+    <div id="onboarding-step-1" class="onboarding-step">
+      <div class="onboarding-emoji">👋</div>
+      <h2>مرحبًا بيك في GoalTrack</h2>
+      <p class="onboarding-desc">إمتى تحب تبدأ رحلتك؟ من التاريخ ده هنبدأ نحسب أسابيعك وشهورك.</p>
+      <div class="field">
+        <label for="onboarding-start-date">تاريخ بداية الرحلة</label>
+        <input type="date" id="onboarding-start-date" />
+      </div>
+      <button type="button" id="btn-onboarding-next-1" class="btn btn--primary">التالي</button>
+    </div>
+
+    <!-- الخطوة 2: يوم بداية الأسبوع -->
+    <div id="onboarding-step-2" class="onboarding-step hidden">
+      <div class="onboarding-emoji">🗓️</div>
+      <h2>إمتى يبدأ أسبوعك؟</h2>
+      <p class="onboarding-desc">اختار اليوم اللي هتحسب بيه كل أسابيعك في التطبيق.</p>
+      <div id="onboarding-week-options" class="onboarding-radio-group"></div>
+      <div class="onboarding-actions">
+        <button type="button" id="btn-onboarding-back-2" class="btn btn--ghost">رجوع</button>
+        <button type="button" id="btn-onboarding-next-2" class="btn btn--primary">التالي</button>
+      </div>
+    </div>
+
+    <!-- الخطوة 3: أول أهداف -->
+    <div id="onboarding-step-3" class="onboarding-step hidden">
+      <div class="onboarding-emoji">🎯</div>
+      <h2>خلينا نضيف أول أهدافك</h2>
+      <p class="onboarding-desc">تقدر تضيف كذا هدف دلوقتي، أو تتخطى الخطوة دي وتضيفهم بعدين.</p>
+      <div class="add-goal-row">
+        <input type="text" id="onboarding-goal-name" placeholder="اسم الهدف (مثال: الجيم)" />
+        <input type="number" id="onboarding-goal-points" placeholder="النقاط" min="1" style="width:100px;" />
+        <button type="button" id="btn-onboarding-add-goal" class="btn btn--ghost" style="width:auto;padding:10px 16px;">+ إضافة</button>
+      </div>
+      <div id="onboarding-goals-list" class="onboarding-goals-list"></div>
+      <div class="onboarding-actions">
+        <button type="button" id="btn-onboarding-back-3" class="btn btn--ghost">رجوع</button>
+        <button type="button" id="btn-onboarding-finish" class="btn btn--primary">ابدأ رحلتي 🚀</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="app-shell" class="app-shell hidden">
+
+  <main class="main-content">
+    <div class="topbar">
+      <div>
+        <h1>أهلًا بك في رحلتك 🧭</h1>
+        <div class="week-range" id="week-range-label"></div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button id="btn-theme-toggle" class="icon-btn" title="تبديل الوضع الليلي/النهاري">🌓</button>
+      </div>
+    </div>
+
+    <!-- شريط الـ Tabs -->
+    <div class="tab-bar" id="tab-bar"></div>
+
+    <!-- ============ صفحة الرئيسية ============ -->
+    <div class="page" id="page-home" data-page="home">
+
+    <!-- البوصلة + مسار الأيام -->
+    <section class="hero-card">
+      <div id="level-bar-container" class="level-bar-wrap"></div>
+      <div id="compass-container"></div>
+      <div id="streak-coins-container" class="stat-pills-row"></div>
+      <div id="day-path-container"></div>
+    </section>
+
+    <!-- البحث -->
+    <section class="section-card" id="search-section">
+      <h2>البحث <small>داخل الأهداف والملاحظات وملاحظات الأسابيع</small></h2>
+      <div class="search-row">
+        <input type="text" id="search-input" placeholder="ابحث..." />
+        <select id="search-goal-filter"></select>
+      </div>
+      <div id="search-results"></div>
+    </section>
+
+    <!-- الرسم البياني الأسبوعي -->
+    <section class="section-card">
+      <h2>نقاطك خلال أيام الأسبوع</h2>
+      <div class="chart-wrap"><canvas id="weekly-points-chart"></canvas></div>
+    </section>
+
+    <!-- مهام اليوم المختار -->
+    <section class="section-card">
+      <h2>
+        مهام يوم <span id="selected-day-label"></span>
+        <button id="btn-toggle-rest" class="btn btn--ghost" style="font-size:12px; padding:8px 12px;"></button>
+      </h2>
+      <div id="tasks-container"></div>
+    </section>
+
+    <!-- إدارة الأهداف -->
+    <section class="section-card">
+      <h2>إدارة الأهداف <small>أضف، عدّل، أو احذف أهدافك الثابتة</small></h2>
+      <div class="add-goal-row">
+        <input type="text" id="new-goal-name" placeholder="اسم الهدف (مثال: القرآن، البرمجة، الجيم...)" />
+        <input type="number" id="new-goal-points" placeholder="النقاط" min="1" style="width:100px;" />
+        <button id="btn-add-goal" class="btn btn--primary" style="width:auto; padding:10px 20px;">+ إضافة</button>
+      </div>
+      <div id="goals-manager-list"></div>
+    </section>
+
+    <!-- ملاحظات الأسبوع -->
+    <section class="section-card">
+      <h2>ملاحظات الأسبوع</h2>
+      <div class="notes-grid">
+        <div class="field"><label>أفضل شيء حدث هذا الأسبوع</label><textarea id="week-note-best"></textarea></div>
+        <div class="field"><label>أسوأ شيء حدث هذا الأسبوع</label><textarea id="week-note-worst"></textarea></div>
+        <div class="field"><label>أكبر تحدٍ واجهته</label><textarea id="week-note-challenge"></textarea></div>
+        <div class="field"><label>ما الذي سأطوره الأسبوع القادم</label><textarea id="week-note-improve"></textarea></div>
+        <div class="field" style="grid-column: 1 / -1;"><label>ملاحظات عامة</label><textarea id="week-note-general"></textarea></div>
+      </div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الرئيسية ============ -->
+
+    <!-- ============ صفحة التقويم ============ -->
+    <div class="page hidden" id="page-calendar" data-page="calendar">
+
+    <!-- التقويم التفاعلي -->
+    <section class="section-card" id="calendar-section">
+      <h2>
+        <span id="calendar-label"></span>
+        <span>
+          <button class="icon-btn" id="btn-cal-prev">‹</button>
+          <button class="icon-btn" id="btn-cal-next">›</button>
+        </span>
+      </h2>
+      <div id="calendar-container"></div>
+    </section>
+
+    <!-- Heatmap السنوي -->
+    <section class="section-card" id="heatmap-section">
+      <h2>
+        خريطة الإنتاجية <span id="heatmap-year-label"></span>
+        <span>
+          <button class="icon-btn" id="btn-heatmap-prev">‹</button>
+          <button class="icon-btn" id="btn-heatmap-next">›</button>
+        </span>
+      </h2>
+      <div id="heatmap-container" class="heatmap-scroll"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة التقويم ============ -->
+
+    <!-- ============ صفحة الإحصائيات ============ -->
+    <div class="page hidden" id="page-stats" data-page="stats">
+
+    <!-- التقارير التلقائية -->
+    <section class="section-card" id="reports-section">
+      <h2>التقارير</h2>
+      <div class="report-tabs">
+        <button class="js-report-tab is-active" data-tab="week">أسبوعي</button>
+        <button class="js-report-tab" data-tab="month">شهري</button>
+        <button class="js-report-tab" data-tab="quarter">ربع سنوي</button>
+        <button class="js-report-tab" data-tab="year">سنوي</button>
+      </div>
+      <div class="report-nav">
+        <button class="icon-btn" id="btn-report-prev">‹</button>
+        <span id="report-period-label" class="report-period-label"></span>
+        <button class="icon-btn" id="btn-report-next">›</button>
+      </div>
+      <div id="report-content"></div>
+      <div class="chart-wrap" style="margin-top:14px;"><canvas id="report-trend-chart"></canvas></div>
+    </section>
+
+    <!-- مقارنة الأداء -->
+    <section class="section-card" id="comparison-section">
+      <h2>مقارنة الأداء</h2>
+      <div id="comparison-container"></div>
+    </section>
+
+    <!-- أهداف السنة -->
+    <section class="section-card" id="year-goals-section">
+      <h2>تقدّم أهدافك خلال السنة</h2>
+      <div id="year-goals-container"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الإحصائيات ============ -->
+
+    <!-- ============ صفحة الإنجازات ============ -->
+    <div class="page hidden" id="page-achievements" data-page="achievements">
+
+    <section class="section-card" id="achievements-section">
+      <h2>الإنجازات <small id="achievements-count">0 / 0</small></h2>
+      <div id="achievements-grid" class="achievements-grid"></div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة الإنجازات ============ -->
+
+    <!-- ============ صفحة استكشاف ============ -->
+    <div class="page hidden" id="page-explore" data-page="explore">
+
+    <!-- Explore: مشاركة القوالب -->
+    <section class="section-card" id="explore-section">
+      <h2>استكشاف <small>شارك أهدافك كقالب جاهز، أو انسخ قالب حد تاني</small></h2>
+      <div class="add-goal-row">
+        <input type="text" id="template-title" placeholder="اسم القالب (مثال: خطة تعلم البرمجة)" />
+        <input type="text" id="template-description" placeholder="وصف مختصر (اختياري)" />
+        <button id="btn-share-template" class="btn btn--primary" style="width:auto; padding:10px 20px;">🌍 شارك أهدافي الحالية</button>
+      </div>
+      <div id="explore-list" class="explore-grid"></div>
+    </section>
+
+    <!-- النسخ الاحتياطي -->
+    <section class="section-card" id="backup-section">
+      <h2>النسخ الاحتياطي</h2>
+      <p id="auto-backup-info" class="backup-info"></p>
+      <div class="backup-actions">
+        <button id="btn-export" class="btn btn--ghost">⬇️ تصدير بياناتي (JSON)</button>
+        <label class="btn btn--ghost" for="import-file-input" style="cursor:pointer;">⬆️ استيراد ملف JSON</label>
+        <input type="file" id="import-file-input" accept="application/json" class="hidden" />
+        <button id="btn-restore-backup" class="btn btn--ghost">↺ استعادة آخر نسخة تلقائية</button>
+      </div>
+    </section>
+
+    </div>
+    <!-- ============ نهاية صفحة استكشاف ============ -->
+
+    <!-- ============ صفحة حسابي (Profile) — خارج نظام الـ Tabs ============ -->
+    <div class="page page--profile hidden" id="page-profile">
+      <button class="btn btn--ghost profile-back-btn" id="btn-profile-back">→ رجوع</button>
+
+      <div class="profile-header">
+        <div class="profile-avatar" id="profile-avatar">؟</div>
+        <div>
+          <div class="profile-header__name" id="profile-name"></div>
+          <div class="profile-header__email" id="profile-email"></div>
+        </div>
+        <button class="profile-switcher-toggle" id="btn-account-switcher-toggle" title="تبديل الحساب">▼</button>
+
+        <div class="account-dropdown hidden" id="account-dropdown">
+          <div id="account-dropdown-list" class="account-dropdown__list"></div>
+          <div class="account-dropdown__divider"></div>
+          <button class="account-dropdown__action" id="btn-dropdown-add-account">➕ إضافة حساب جديد</button>
+          <button class="account-dropdown__action account-dropdown__action--danger" id="btn-dropdown-logout">🚪 تسجيل الخروج من هذا الحساب</button>
+        </div>
+      </div>
+
+      <section class="section-card">
+        <h2>معلومات الحساب</h2>
+        <div class="profile-info-grid">
+          <div class="profile-info-item"><span>تاريخ إنشاء الحساب</span><strong id="profile-created"></strong></div>
+          <div class="profile-info-item"><span>آخر تسجيل دخول</span><strong id="profile-last-login"></strong></div>
+          <div class="profile-info-item"><span>مستوى الحساب</span><strong id="profile-level"></strong></div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <h2>إعدادات الحساب</h2>
+        <p id="profile-google-notice" class="profile-google-notice hidden">🔒 حسابك مسجّل بواسطة جوجل، فكلمة المرور بتتدار من هناك مباشرة.</p>
+        <div class="profile-actions">
+          <button id="btn-change-name" class="btn btn--ghost">✏️ تغيير الاسم</button>
+          <button id="btn-change-email" class="btn btn--ghost">✉️ تغيير البريد الإلكتروني</button>
+          <button id="btn-change-password" class="btn btn--ghost">🔑 تغيير كلمة المرور</button>
+        </div>
+        <div class="field" style="margin-top:16px;">
+          <label>يوم بداية الأسبوع</label>
+          <div id="settings-week-start-options" class="onboarding-radio-group"></div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <h2>إدارة الحسابات</h2>
+        <p class="accounts-hint">الحسابات اللي سجّلت دخول بيها قبل كده على الجهاز ده — بدّل بينهم بضغطة واحدة من غير ما تكتب الباسورد تاني.</p>
+        <div id="known-accounts-list" class="accounts-list"></div>
+        <div class="profile-actions" style="margin-top:14px;">
+          <button id="btn-add-account" class="btn btn--ghost">➕ إضافة حساب آخر</button>
+          <button id="btn-profile-logout" class="btn btn--ghost">🚪 تسجيل الخروج</button>
+        </div>
+      </section>
+    </div>
+    <!-- ============ نهاية صفحة حسابي ============ -->
+  </main>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">GoalTrack</div>
+    <ul class="nav-list" id="nav-list">
+      <li class="nav-item is-active" data-page="home">🧭 الرئيسية</li>
+      <li class="nav-item" data-page="calendar">📅 التقويم</li>
+      <li class="nav-item" data-page="stats">📊 الإحصائيات</li>
+      <li class="nav-item" data-page="achievements">🏆 الإنجازات</li>
+      <li class="nav-item" data-page="explore">🌍 استكشاف</li>
+      <li class="nav-item" id="nav-profile">👤 حسابي</li>
+    </ul>
+    <div class="sidebar-footer">
+      <button id="btn-logout" class="btn btn--ghost">تسجيل الخروج</button>
+    </div>
+  </aside>
+
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+
+<!-- مكتبات خارجية -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- ملفات التطبيق -->
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
